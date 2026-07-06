@@ -1,0 +1,24 @@
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# Node
+node_modules
+npm-debug.log*
+
+# Local secrets
+.env
+.env.*
+!.envrc
+secrets*.env
+
+# Nix/build outputs
+result
+result-*
+
+# OS/editor
+.DS_Store

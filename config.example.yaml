@@ -1,0 +1,51 @@
+server:
+  host: "0.0.0.0"
+  port: 8787
+  readAuth:
+    mode: "none"
+  ingestAuth:
+    mode: "bearer"
+    tokenEnv: "USAGENT_INGEST_TOKEN"
+  statePath: "%STATE%/usagent/snapshot.json"
+
+usageView:
+  providers: ["claude-code", "openai", "z-ai"]
+  windows: ["session", "weekly", "monthly", "fableWeekly"]
+  percentMode: "remaining" # remaining | used
+  labelStyle: "long" # long | short
+  showResetMinutes: true
+  show24hUsage: false
+  hideUnavailable: true
+  excludeWindows: ["web"]
+
+quota:
+  refreshMs: 300000
+  providers:
+    - id: "claude-code"
+      label: "Claude"
+      source: "push"
+      staleMs: 600000
+      highlightedBucket: "fable"
+      highlightedBucketLabel: "Fable"
+
+    - id: "openai"
+      label: "OpenAI"
+      source: "pull"
+      apiKeyEnv: "OPENAI_ADMIN_KEY"
+      refreshMs: 600000
+      budgets:
+        - id: "weekly-usd"
+          unit: "usd"
+          limit: 50
+          window: { id: "week", kind: "weekly" }
+        - id: "monthly-usd"
+          unit: "usd"
+          limit: 200
+          window: { id: "month", kind: "monthly" }
+
+    - id: "z-ai"
+      label: "z.ai"
+      source: "pull"
+      endpointUrl: "https://api.z.ai/api/monitor/usage/quota/limit"
+      tokenEnv: "ZAI_API_KEY"
+      refreshMs: 300000

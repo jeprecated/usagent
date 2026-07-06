@@ -1,0 +1,8 @@
+.jj
+.git
+node_modules
+.env
+.env.*
+!.envrc
+result
+.DS_Store
