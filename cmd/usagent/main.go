@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jmalloc/usagent/internal/app"
+	"github.com/jmalloc/usagent/internal/cli"
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/httpapi"
 )
@@ -24,6 +25,21 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "usage", "status":
+			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
+				fmt.Fprint(os.Stdout, "usagent usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
+				return nil
+			}
+			return cli.RunUsage(context.Background(), args[1:], os.Stdout, os.Stderr)
+		case "serve":
+			args = args[1:]
+		case "help", "-h", "--help":
+			fmt.Fprint(os.Stdout, "usagent usage: usagent [serve] [--config PATH] [--host HOST] [--port PORT]\n              usagent usage [--config PATH] [--json] [--offline] [--timeout 10s]\n")
+			return nil
+		}
+	}
 	opts, err := config.ParseFlags(args)
 	if err != nil {
 		return err

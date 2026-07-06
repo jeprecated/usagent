@@ -101,7 +101,7 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 		}
 		return providers.Result{}, fmt.Errorf("z.ai quota returned code %d: %s", pl.Code, pl.Msg)
 	}
-	return providers.Result{Items: Normalize(pl.Data.Limits, p.cfg)}, nil
+	return providers.Result{Items: Normalize(pl.Data.Limits, p.cfg, now)}, nil
 }
 
 func (p *Provider) token() (string, string) {
@@ -144,7 +144,7 @@ func (p *Provider) authorize(req *http.Request, token string) {
 	}
 }
 
-func Normalize(limits []limit, cfg config.ZAIConfig) []model.QuotaItem {
+func Normalize(limits []limit, cfg config.ZAIConfig, now time.Time) []model.QuotaItem {
 	excluded := map[string]bool{"TIME_LIMIT": true}
 	if len(cfg.ExcludeLimitTypes) > 0 {
 		excluded = map[string]bool{}
@@ -176,8 +176,12 @@ func Normalize(limits []limit, cfg config.ZAIConfig) []model.QuotaItem {
 		if l.Percentage == nil && limitValue > 0 {
 			percent = used / limitValue * 100
 		}
-		windowID, windowLabel, windowKind := windowFor(typ)
-		item := model.QuotaItem{ID: "z-ai-" + strings.ToLower(strings.ReplaceAll(typ, "_", "-")), Provider: "z-ai", Label: "z.ai " + windowLabel, Window: model.Window{ID: windowID, Label: windowLabel, Kind: windowKind}, Unit: unitFor(typ), Limit: round2(limitValue), Used: round2(used), Remaining: round2(math.Max(0, remaining)), PercentUsed: clampPercent(percent), State: "fresh", Severity: "ok", Visible: visible}
+		windowID, windowLabel, windowKind := windowForLimit(typ, l, now)
+		itemID := "z-ai-" + strings.ToLower(strings.ReplaceAll(typ, "_", "-"))
+		if typ == "TOKENS_LIMIT" {
+			itemID += "-" + windowID
+		}
+		item := model.QuotaItem{ID: itemID, Provider: "z-ai", Label: "z.ai " + windowLabel, Window: model.Window{ID: windowID, Label: windowLabel, Kind: windowKind}, Unit: unitFor(typ), Limit: round2(limitValue), Used: round2(used), Remaining: round2(math.Max(0, remaining)), PercentUsed: clampPercent(percent), State: "fresh", Severity: "ok", Visible: visible}
 		if l.NextResetTime != nil {
 			reset := int64(*l.NextResetTime)
 			item.Window.ResetAt = &reset
@@ -195,12 +199,18 @@ func value(p *float64, def float64) float64 {
 	return *p
 }
 
-func windowFor(typ string) (id, label, kind string) {
+func windowForLimit(typ string, l limit, now time.Time) (id, label, kind string) {
 	switch typ {
 	case "SESSION_LIMIT":
 		return "session", "S", "rolling"
 	case "TOKENS_LIMIT":
-		return "tokens", "Tokens", "rolling"
+		if l.NextResetTime != nil {
+			reset := time.UnixMilli(int64(*l.NextResetTime))
+			if reset.Sub(now) > 24*time.Hour {
+				return "weekly", "W", "weekly"
+			}
+		}
+		return "session", "S", "rolling"
 	case "TIMES_LIMIT":
 		return "requests", "Req", "rolling"
 	case "RATE_LIMIT":

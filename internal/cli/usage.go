@@ -1,0 +1,244 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jmalloc/usagent/internal/app"
+	"github.com/jmalloc/usagent/internal/config"
+	"github.com/jmalloc/usagent/internal/model"
+)
+
+type UsageOptions struct {
+	ConfigPath string
+	Host       string
+	Port       int
+	JSON       bool
+	Offline    bool
+	Timeout    time.Duration
+}
+
+func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	opts, err := parseUsageFlags(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadWithOverrides(opts.ConfigPath, config.CLIOptions{ConfigPath: opts.ConfigPath, Host: opts.Host, Port: opts.Port})
+	if err != nil {
+		return err
+	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 10 * time.Second
+	}
+
+	var usage model.Usage
+	if !opts.Offline {
+		usage, err = FetchUsageFromDaemon(ctx, cfg, opts.Timeout)
+		if err == nil {
+			return writeUsage(stdout, usage, opts.JSON)
+		}
+		if stderr != nil {
+			_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, refreshing locally: %v\n", err)
+		}
+	}
+	usage, err = LocalUsage(ctx, cfg, opts.Timeout)
+	if err != nil {
+		return err
+	}
+	return writeUsage(stdout, usage, opts.JSON)
+}
+
+func parseUsageFlags(args []string) (UsageOptions, error) {
+	fs := flag.NewFlagSet("usagent usage", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	opts := UsageOptions{ConfigPath: config.DefaultConfigPath(), Host: os.Getenv("USAGENT_HOST"), Port: envInt("USAGENT_PORT", 0), Timeout: 10 * time.Second}
+	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
+	fs.StringVar(&opts.Host, "host", opts.Host, "daemon listen host override")
+	fs.IntVar(&opts.Port, "port", opts.Port, "daemon listen port override")
+	fs.BoolVar(&opts.JSON, "json", false, "print raw schema v2 usage JSON")
+	fs.BoolVar(&opts.Offline, "offline", false, "skip daemon and refresh/read usage locally")
+	fs.DurationVar(&opts.Timeout, "timeout", opts.Timeout, "daemon/local refresh timeout")
+	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	if fs.NArg() > 0 {
+		return opts, fmt.Errorf("unexpected usage arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	return opts, nil
+}
+
+func FetchUsageFromDaemon(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	u := url.URL{Scheme: "http", Host: net.JoinHostPort(clientHost(cfg.Server.Host), fmt.Sprint(cfg.Server.Port)), Path: "/v1/usage"}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return model.Usage{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Usage{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return model.Usage{}, fmt.Errorf("GET %s returned HTTP %d", u.String(), resp.StatusCode)
+	}
+	var usage model.Usage
+	if err := json.NewDecoder(resp.Body).Decode(&usage); err != nil {
+		return model.Usage{}, err
+	}
+	if usage.SchemaVersion != 2 || usage.Service != "usagent" {
+		return model.Usage{}, errors.New("daemon returned unexpected usage schema")
+	}
+	return usage, nil
+}
+
+func LocalUsage(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := app.New(cfg, logger)
+	if err := a.LoadState(); err != nil {
+		return model.Usage{}, err
+	}
+	now := time.Now()
+	for _, p := range a.Providers {
+		if ctx.Err() != nil {
+			return model.Usage{}, ctx.Err()
+		}
+		if a.Store.NeedsRefresh(p.ID(), now) {
+			a.RefreshOne(ctx, p, now)
+		}
+	}
+	return a.Usage(time.Now()), nil
+}
+
+func FormatUsage(usage model.Usage) string {
+	itemsByProvider := map[string][]model.QuotaItem{}
+	for _, item := range usage.QuotaItems {
+		if !item.Visible {
+			continue
+		}
+		itemsByProvider[item.Provider] = append(itemsByProvider[item.Provider], item)
+	}
+	for provider := range itemsByProvider {
+		sort.SliceStable(itemsByProvider[provider], func(i, j int) bool {
+			left, right := itemsByProvider[provider][i], itemsByProvider[provider][j]
+			if left.Window.ID == right.Window.ID {
+				return left.ID < right.ID
+			}
+			return left.Window.ID < right.Window.ID
+		})
+	}
+	lines := []string{}
+	for _, provider := range usage.Providers {
+		items := itemsByProvider[provider.ID]
+		state := string(provider.State)
+		if state == "" {
+			state = "stale"
+		}
+		if len(items) == 0 {
+			lines = append(lines, fmt.Sprintf("%s: unavailable [%s]", provider.Label, state))
+			continue
+		}
+		parts := make([]string, 0, len(items))
+		hasItemState := false
+		for _, item := range items {
+			if item.State != "" && item.State != "fresh" {
+				hasItemState = true
+			}
+			parts = append(parts, formatItem(item))
+		}
+		line := fmt.Sprintf("%s: %s", provider.Label, strings.Join(parts, " · "))
+		if state != "fresh" && !hasItemState {
+			line += " [" + state + "]"
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return "No providers configured.\n"
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func writeUsage(w io.Writer, usage model.Usage, asJSON bool) error {
+	if asJSON {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(usage)
+	}
+	_, err := io.WriteString(w, FormatUsage(usage))
+	return err
+}
+
+func formatItem(item model.QuotaItem) string {
+	label := item.Window.Label
+	if label == "" {
+		label = item.Label
+	}
+	value := formatRemaining(item)
+	if item.State != "" && item.State != "fresh" {
+		value += " [" + item.State + "]"
+	}
+	return fmt.Sprintf("%s %s", label, value)
+}
+
+func formatRemaining(item model.QuotaItem) string {
+	remaining := item.Remaining
+	switch strings.ToLower(item.Unit) {
+	case "percent", "%":
+		return fmt.Sprintf("%s remaining", formatNumber(remaining)+"%")
+	case "usd":
+		return fmt.Sprintf("$%s remaining", formatNumber(remaining))
+	default:
+		unit := item.Unit
+		if unit == "" {
+			unit = "units"
+		}
+		return fmt.Sprintf("%s %s remaining", formatNumber(remaining), unit)
+	}
+}
+
+func formatNumber(v float64) string {
+	if math.Abs(v-math.Round(v)) < 0.005 {
+		return fmt.Sprintf("%.0f", v)
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+func clientHost(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::", "[::]":
+		return "::1"
+	default:
+		return host
+	}
+}
+
+func envInt(k string, d int) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return d
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return d
+	}
+	return n
+}

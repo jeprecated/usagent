@@ -104,7 +104,7 @@ func (p *Provider) fetchBudgetCost(ctx context.Context, now time.Time, apiKey st
 			q.Add("group_by[]", v)
 		}
 		if page != "" {
-			q.Set("page", page)
+			q.Set("after", page)
 		}
 		u.RawQuery = q.Encode()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -117,12 +117,17 @@ func (p *Provider) fetchBudgetCost(ctx context.Context, now time.Time, apiKey st
 		if err != nil {
 			return 0, 0, err
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return 0, retryAfter(resp.Header.Get("retry-after"), 0, now), fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
+			retry := retryAfter(resp.Header.Get("retry-after"), 0, now)
+			_ = resp.Body.Close()
+			return 0, retry, fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
 		}
 		var payload costsPayload
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			_ = resp.Body.Close()
+			return 0, 0, err
+		}
+		if err := resp.Body.Close(); err != nil {
 			return 0, 0, err
 		}
 		used += sumCosts(payload, b.Unit)

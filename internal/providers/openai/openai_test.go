@@ -23,7 +23,7 @@ func TestOpenAICostNormalizationWeeklyMonthlyMultiBucketAndPagination(t *testing
 		if r.URL.Query().Get("bucket_width") != "1d" || r.URL.Query().Get("start_time") == "" || r.URL.Query().Get("end_time") == "" {
 			t.Fatalf("query=%s", r.URL.RawQuery)
 		}
-		if r.URL.Query().Get("page") == "" {
+		if r.URL.Query().Get("after") == "" {
 			fmt.Fprint(w, `{"data":[{"results":[{"amount":{"value":2.25,"currency":"usd"}},{"amount":{"value":1.25,"currency":"usd"}}]}],"next_page":"p2"}`)
 			return
 		}

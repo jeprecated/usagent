@@ -89,6 +89,22 @@ func TestExpandRuntimePath(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPathUsesXDGConfigBeforeExample(t *testing.T) {
+	t.Setenv("USAGENT_CONFIG", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "usagent", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("server: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := DefaultConfigPath(); got != path {
+		t.Fatalf("DefaultConfigPath()=%q want %q", got, path)
+	}
+}
+
 func TestParseFlagsAndEnvOverrides(t *testing.T) {
 	t.Setenv("USAGENT_CONFIG", "env.yaml")
 	t.Setenv("USAGENT_HOST", "0.0.0.0")

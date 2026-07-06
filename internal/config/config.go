@@ -177,9 +177,24 @@ func Default() Config {
 	}
 }
 
+func DefaultConfigPath() string {
+	if v := os.Getenv("USAGENT_CONFIG"); v != "" {
+		return v
+	}
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	if xdg == "" {
+		xdg = filepath.Join(homeDir(), ".config")
+	}
+	candidate := filepath.Join(xdg, "usagent", "config.yaml")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return "config.example.yaml"
+}
+
 func ParseFlags(args []string) (CLIOptions, error) {
 	fs := flag.NewFlagSet("usagent", flag.ContinueOnError)
-	opts := CLIOptions{ConfigPath: getenv("USAGENT_CONFIG", "config.example.yaml")}
+	opts := CLIOptions{ConfigPath: DefaultConfigPath()}
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
 	fs.StringVar(&opts.Host, "host", os.Getenv("USAGENT_HOST"), "listen host override")
 	fs.IntVar(&opts.Port, "port", envInt("USAGENT_PORT", 0), "listen port override")

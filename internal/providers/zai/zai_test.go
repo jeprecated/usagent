@@ -30,7 +30,7 @@ func TestZAINormalizesDocumentedFixtureHidesTimeLimitAndReset(t *testing.T) {
 		t.Fatalf("items=%+v", res.Items)
 	}
 	first := res.Items[0]
-	if first.ID != "z-ai-tokens-limit" || first.Unit != "tokens" || first.Used != 250 || first.Remaining != 750 || first.Limit != 1000 || first.PercentUsed != 25 || first.Window.ResetAt == nil || *first.Window.ResetAt != reset {
+	if first.ID != "z-ai-tokens-limit-session" || first.Window.ID != "session" || first.Window.Label != "S" || first.Unit != "tokens" || first.Used != 250 || first.Remaining != 750 || first.Limit != 1000 || first.PercentUsed != 25 || first.Window.ResetAt == nil || *first.Window.ResetAt != reset {
 		t.Fatalf("tokens=%+v", first)
 	}
 	if res.Items[1].Window.ID != "session" || res.Items[1].PercentUsed != 20 {
@@ -40,6 +40,27 @@ func TestZAINormalizesDocumentedFixtureHidesTimeLimitAndReset(t *testing.T) {
 		t.Fatalf("unknown=%+v", res.Items[2])
 	}
 }
+
+func TestZAINormalizesShortAndLongTokenLimitsAsSessionAndWeekly(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	shortReset := jsonNumber(now.Add(5 * time.Hour).UnixMilli())
+	longReset := jsonNumber(now.Add(72 * time.Hour).UnixMilli())
+	items := Normalize([]limit{
+		{Type: "TOKENS_LIMIT", CurrentValue: floatPtr(1), Remaining: floatPtr(9), Percentage: floatPtr(10), NextResetTime: &shortReset},
+		{Type: "TOKENS_LIMIT", CurrentValue: floatPtr(2), Remaining: floatPtr(8), Percentage: floatPtr(20), NextResetTime: &longReset},
+	}, config.ZAIConfig{}, now)
+	if len(items) != 2 {
+		t.Fatalf("items=%+v", items)
+	}
+	if items[0].ID != "z-ai-tokens-limit-session" || items[0].Window.ID != "session" || items[0].Window.Label != "S" {
+		t.Fatalf("session item=%+v", items[0])
+	}
+	if items[1].ID != "z-ai-tokens-limit-weekly" || items[1].Window.ID != "weekly" || items[1].Window.Label != "W" {
+		t.Fatalf("weekly item=%+v", items[1])
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }
 
 func TestZAIFallbackTokenAndHeaderOverride(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "")

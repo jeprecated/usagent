@@ -17,7 +17,7 @@
   scripts.start.exec = "go run ./cmd/usagent --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
   scripts.dev.exec = "go run ./cmd/usagent --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
   scripts.check.exec = "go test ./...";
-  scripts.usage.exec = "curl -fsS http://127.0.0.1:$USAGENT_PORT/v1/usage | jq .";
+  scripts.usage.exec = "go run ./cmd/usagent usage --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
 
   enterTest = ''
     go test ./...
