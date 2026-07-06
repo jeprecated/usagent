@@ -76,6 +76,29 @@ func TestClaudeFetchHonorsRetryAfter(t *testing.T) {
 	}
 }
 
+func TestClaudeFetchFallsBackToAnthropicResetHeaders(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "credentials.json")
+	if err := os.WriteFile(credPath, []byte(`{"claudeAiOauth":{"accessToken":"secret-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("anthropic-ratelimit-requests-remaining", "0")
+		w.Header().Set("anthropic-ratelimit-requests-reset", now.Add(23*time.Second).Format(time.RFC3339))
+		http.Error(w, "rate", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	p := New(config.ClaudeOAuthConfig{CredentialsPath: credPath, EndpointURL: srv.URL, BetaHeader: "oauth-test"})
+	res, err := p.Fetch(context.Background(), now)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if res.RetryAfter != 23*time.Second {
+		t.Fatalf("retryAfter=%s", res.RetryAfter)
+	}
+}
+
 func TestClaudeDoesNotFabricateMissingBuckets(t *testing.T) {
 	payload := usagePayload{Limits: []limit{{Kind: "session"}}}
 	items := Normalize(payload, time.UnixMilli(1000), 1000, 2000)

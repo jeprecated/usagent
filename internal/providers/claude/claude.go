@@ -14,6 +14,7 @@ import (
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/model"
 	"github.com/jmalloc/usagent/internal/providers"
+	"github.com/jmalloc/usagent/internal/ratelimit"
 )
 
 type Provider struct {
@@ -75,7 +76,7 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return providers.Result{RetryAfter: retryAfter(resp.Header.Get("retry-after"), 0, now)}, fmt.Errorf("claude oauth usage returned HTTP %d", resp.StatusCode)
+		return providers.Result{RetryAfter: ratelimit.AnthropicRetryAfter(resp.Header, now)}, fmt.Errorf("claude oauth usage returned HTTP %d", resp.StatusCode)
 	}
 	var payload usagePayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -196,24 +197,4 @@ func parseResetAt(v string) *int64 {
 	}
 	out := t.UnixMilli()
 	return &out
-}
-
-func retryAfter(v string, def time.Duration, now time.Time) time.Duration {
-	if v == "" {
-		return def
-	}
-	if secs, err := time.ParseDuration(v + "s"); err == nil {
-		if secs < time.Second {
-			return time.Second
-		}
-		return secs
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		d := t.Sub(now)
-		if d < time.Second {
-			return time.Second
-		}
-		return d
-	}
-	return def
 }

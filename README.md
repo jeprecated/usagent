@@ -39,7 +39,7 @@ usagent usage --offline  # skip daemon lookup and refresh/read locally
 - `GET /v1/usage`
 - `GET /v1/providers`
 
-`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator.
+`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling.
 
 ## Config
 

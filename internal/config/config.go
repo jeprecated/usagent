@@ -15,6 +15,12 @@ import (
 
 const DefaultStateBase = "~/.local/state"
 
+const (
+	MinClaudeOAuthRefreshMs = int64((5 * time.Minute) / time.Millisecond)
+	MinOpenAIRefreshMs      = int64((10 * time.Minute) / time.Millisecond)
+	MinZAIRefreshMs         = int64((5 * time.Minute) / time.Millisecond)
+)
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Providers ProvidersConfig `yaml:"providers"`
@@ -278,6 +284,7 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.ClaudeOAuth.RefreshMs <= 0 {
 		cfg.Providers.ClaudeOAuth.RefreshMs = cfg.Quota.RefreshMs
 	}
+	cfg.Providers.ClaudeOAuth.RefreshMs = max(cfg.Providers.ClaudeOAuth.RefreshMs, MinClaudeOAuthRefreshMs)
 	if cfg.Providers.ClaudeOAuth.StaleMs <= 0 {
 		cfg.Providers.ClaudeOAuth.StaleMs = max(cfg.Providers.ClaudeOAuth.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
@@ -323,6 +330,7 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.OpenAI.RefreshMs <= 0 {
 		cfg.Providers.OpenAI.RefreshMs = cfg.Quota.RefreshMs
 	}
+	cfg.Providers.OpenAI.RefreshMs = max(cfg.Providers.OpenAI.RefreshMs, MinOpenAIRefreshMs)
 	if cfg.Providers.OpenAI.StaleMs <= 0 {
 		cfg.Providers.OpenAI.StaleMs = max(cfg.Providers.OpenAI.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
@@ -348,6 +356,7 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.ZAI.RefreshMs <= 0 {
 		cfg.Providers.ZAI.RefreshMs = cfg.Quota.RefreshMs
 	}
+	cfg.Providers.ZAI.RefreshMs = max(cfg.Providers.ZAI.RefreshMs, MinZAIRefreshMs)
 	if cfg.Providers.ZAI.StaleMs <= 0 {
 		cfg.Providers.ZAI.StaleMs = max(cfg.Providers.ZAI.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}

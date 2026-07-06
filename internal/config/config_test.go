@@ -105,6 +105,23 @@ func TestDefaultConfigPathUsesXDGConfigBeforeExample(t *testing.T) {
 	}
 }
 
+func TestNormalizeClampsBuiltInProviderRefreshIntervals(t *testing.T) {
+	cfg := Default()
+	cfg.Providers.ClaudeOAuth.Enabled = true
+	cfg.Providers.ClaudeOAuth.RefreshMs = 1000
+	cfg.Providers.OpenAI.Enabled = true
+	cfg.Providers.OpenAI.RefreshMs = 1000
+	cfg.Providers.ZAI.Enabled = true
+	cfg.Providers.ZAI.RefreshMs = 1000
+	cfg, err := Normalize(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Providers.ClaudeOAuth.RefreshMs != MinClaudeOAuthRefreshMs || cfg.Providers.OpenAI.RefreshMs != MinOpenAIRefreshMs || cfg.Providers.ZAI.RefreshMs != MinZAIRefreshMs {
+		t.Fatalf("refreshes claude=%d openai=%d zai=%d", cfg.Providers.ClaudeOAuth.RefreshMs, cfg.Providers.OpenAI.RefreshMs, cfg.Providers.ZAI.RefreshMs)
+	}
+}
+
 func TestParseFlagsAndEnvOverrides(t *testing.T) {
 	t.Setenv("USAGENT_CONFIG", "env.yaml")
 	t.Setenv("USAGENT_HOST", "0.0.0.0")

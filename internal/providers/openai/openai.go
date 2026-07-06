@@ -15,6 +15,7 @@ import (
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/model"
 	"github.com/jmalloc/usagent/internal/providers"
+	"github.com/jmalloc/usagent/internal/ratelimit"
 )
 
 const (
@@ -118,7 +119,7 @@ func (p *Provider) fetchBudgetCost(ctx context.Context, now time.Time, apiKey st
 			return 0, 0, err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			retry := retryAfter(resp.Header.Get("retry-after"), 0, now)
+			retry := ratelimit.RetryAfter(resp.Header, now)
 			_ = resp.Body.Close()
 			return 0, retry, fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
 		}
@@ -247,23 +248,3 @@ func clampPercent(v float64) float64 {
 	return math.Round(v)
 }
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
-
-func retryAfter(v string, def time.Duration, now time.Time) time.Duration {
-	if v == "" {
-		return def
-	}
-	if secs, err := time.ParseDuration(v + "s"); err == nil {
-		if secs < time.Second {
-			return time.Second
-		}
-		return secs
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		d := t.Sub(now)
-		if d < time.Second {
-			return time.Second
-		}
-		return d
-	}
-	return def
-}
