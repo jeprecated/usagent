@@ -4,8 +4,7 @@ server:
   readAuth:
     mode: "none"
   ingestAuth:
-    mode: "bearer"
-    tokenEnv: "USAGENT_INGEST_TOKEN"
+    mode: "none"
   statePath: "%STATE%/usagent/snapshot.json"
 
 usageView:
