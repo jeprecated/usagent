@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
 
 const configPath = process.env.USAGENT_CONFIG ?? "config.example.yaml";
 const port = Number(process.env.USAGENT_PORT ?? 8787);
@@ -12,6 +13,8 @@ const startedAt = Date.now();
 let lastClaudeIngest;
 let configCache;
 let configCacheLoadedAt = 0;
+let claudeOAuthCache = { items: [], nextRefreshAt: 0, staleAt: 0, lastUpdatedAt: 0 };
+let stateCacheLoaded = false;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body, null, 2);
@@ -42,6 +45,35 @@ async function loadConfig() {
   return configCache;
 }
 
+async function loadStateCache(config) {
+  if (stateCacheLoaded) return;
+  stateCacheLoaded = true;
+  const statePath = config?.server?.statePath;
+  if (!statePath) return;
+  const state = await loadJson(statePath);
+  const cached = state?.claudeOAuthCache;
+  if (Array.isArray(cached?.items) && cached.items.length > 0) {
+    claudeOAuthCache = {
+      items: cached.items,
+      nextRefreshAt: Number(cached.nextRefreshAt) || 0,
+      staleAt: Number(cached.staleAt) || 0,
+      lastUpdatedAt: Number(cached.lastUpdatedAt) || 0,
+    };
+  }
+}
+
+async function saveStateCache(config) {
+  const statePath = config?.server?.statePath;
+  if (!statePath) return;
+  const state = {
+    schemaVersion: 1,
+    updatedAt: Date.now(),
+    claudeOAuthCache,
+  };
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify(state, null, 2));
+}
+
 function providerLabel(provider) {
   if (provider === "claude-code") return "Claude";
   if (provider === "openai") return "OpenAI";
@@ -70,7 +102,32 @@ function parseResetAt(value) {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-function claudeOAuthItem({ id, label, windowId, windowLabel, windowKind, usedPercent, resetAt, severity, generatedAt }) {
+function retryAfterMs(response, fallbackMs) {
+  const header = response.headers.get("retry-after");
+  if (!header) return fallbackMs;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(1000, seconds * 1000);
+  const dateMs = Date.parse(header);
+  return Number.isFinite(dateMs) ? Math.max(1000, dateMs - Date.now()) : fallbackMs;
+}
+
+function cachedClaudeOAuthItems(now) {
+  if (!Array.isArray(claudeOAuthCache.items) || claudeOAuthCache.items.length === 0) return [];
+  const stale = now >= claudeOAuthCache.staleAt;
+  return claudeOAuthCache.items.map((item) => ({
+    ...item,
+    state: stale ? "stale" : item.state,
+    severity: stale && item.severity === "ok" ? "warning" : item.severity,
+    refresh: {
+      ...(item.refresh ?? {}),
+      nextRefreshAt: claudeOAuthCache.nextRefreshAt,
+      staleAt: claudeOAuthCache.staleAt,
+    },
+    ...(stale ? { error: { provider: "claude-code", code: "oauth-refresh-failed", message: "Using cached Claude OAuth usage after refresh failure", lastOccurredAt: now, recoverable: true } } : {}),
+  }));
+}
+
+function claudeOAuthItem({ id, label, windowId, windowLabel, windowKind, usedPercent, resetAt, severity, lastUpdatedAt, nextRefreshAt, staleAt }) {
   const used = Math.max(0, Math.min(100, Math.round(Number(usedPercent) || 0)));
   const remaining = Math.max(0, 100 - used);
   return {
@@ -88,10 +145,10 @@ function claudeOAuthItem({ id, label, windowId, windowLabel, windowKind, usedPer
     severity: severity === "critical" || severity === "error" || severity === "warning" ? severity : "ok",
     visible: true,
     refresh: {
-      lastUpdatedAt: generatedAt,
+      lastUpdatedAt,
       source: "provider",
-      nextRefreshAt: generatedAt + 5 * 60 * 1000,
-      staleAt: generatedAt + 10 * 60 * 1000,
+      nextRefreshAt,
+      staleAt,
     },
     ...(Number.isFinite(resetAt) ? { reset: { resetAt, resetWindowId: windowId, source: "provider" } } : {}),
     limit: 100,
@@ -104,11 +161,16 @@ function claudeOAuthItem({ id, label, windowId, windowLabel, windowKind, usedPer
 async function claudeOAuthQuotaItems(config, generatedAt) {
   const providerConfig = config?.providers?.claudeOAuth ?? config?.providers?.claudeCodeOAuth;
   if (!providerConfig?.enabled) return [];
+  await loadStateCache(config);
+  const refreshMs = Number(providerConfig.refreshMs ?? config?.quota?.refreshMs ?? 5 * 60 * 1000);
+  const staleMs = Number(providerConfig.staleMs ?? Math.max(refreshMs * 3, 15 * 60 * 1000));
+  if (generatedAt < claudeOAuthCache.nextRefreshAt) return cachedClaudeOAuthItems(generatedAt);
+
   const credentialsPath = expandHome(providerConfig.credentialsPath ?? "~/.claude/.credentials.json");
   const endpointUrl = providerConfig.endpointUrl ?? "https://api.anthropic.com/api/oauth/usage";
   const credentials = await loadJson(credentialsPath);
   const token = credentials?.claudeAiOauth?.accessToken;
-  if (!token) return [];
+  if (!token) return cachedClaudeOAuthItems(generatedAt);
 
   const response = await fetch(endpointUrl, {
     headers: {
@@ -117,9 +179,15 @@ async function claudeOAuthQuotaItems(config, generatedAt) {
       accept: "application/json",
     },
   });
-  if (!response.ok) return [];
+  if (!response.ok) {
+    claudeOAuthCache.nextRefreshAt = generatedAt + retryAfterMs(response, refreshMs);
+    return cachedClaudeOAuthItems(generatedAt);
+  }
+
   const payload = await response.json();
   const limits = Array.isArray(payload?.limits) ? payload.limits : [];
+  const nextRefreshAt = generatedAt + refreshMs;
+  const staleAt = generatedAt + staleMs;
   const items = [];
 
   const session = limits.find((limit) => limit?.kind === "session") ?? payload?.five_hour;
@@ -133,7 +201,9 @@ async function claudeOAuthQuotaItems(config, generatedAt) {
       usedPercent: session.percent ?? session.utilization,
       resetAt: parseResetAt(session.resets_at),
       severity: session.severity,
-      generatedAt,
+      lastUpdatedAt: generatedAt,
+      nextRefreshAt,
+      staleAt,
     }));
   }
 
@@ -148,7 +218,9 @@ async function claudeOAuthQuotaItems(config, generatedAt) {
       usedPercent: weeklyAll.percent ?? weeklyAll.utilization,
       resetAt: parseResetAt(weeklyAll.resets_at),
       severity: weeklyAll.severity,
-      generatedAt,
+      lastUpdatedAt: generatedAt,
+      nextRefreshAt,
+      staleAt,
     }));
   }
 
@@ -166,11 +238,17 @@ async function claudeOAuthQuotaItems(config, generatedAt) {
       usedPercent: fableWeekly.percent,
       resetAt: parseResetAt(fableWeekly.resets_at),
       severity: fableWeekly.severity,
-      generatedAt,
+      lastUpdatedAt: generatedAt,
+      nextRefreshAt,
+      staleAt,
     }));
   }
 
-  return items;
+  if (items.length > 0) {
+    claudeOAuthCache = { items, nextRefreshAt, staleAt, lastUpdatedAt: generatedAt };
+    await saveStateCache(config).catch(() => {});
+  }
+  return cachedClaudeOAuthItems(generatedAt);
 }
 
 async function legacyQuotaItems(config) {

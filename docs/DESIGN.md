@@ -41,6 +41,8 @@ The verified response includes `limits[]` entries for:
 
 The statusline ingest endpoint remains optional compatibility plumbing, but Claude quota tracking must prefer the OAuth usage API when it is available. Do not fabricate missing buckets.
 
+OAuth usage responses are cached in memory and persisted to `server.statePath`. `/v1/usage` must not call the Anthropic endpoint on every widget poll. If a refresh is rate-limited or otherwise fails after a successful fetch, `usagent` serves the last cached OAuth quota items instead of falling back to stale statusline data and hiding Fable.
+
 ### OpenAI
 
 Use Admin/Organization usage and cost APIs. Config defines budgets/windows for session-ish/hourly, weekly, and monthly views.
