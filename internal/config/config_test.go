@@ -15,8 +15,8 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Server.Port != 8787 {
 		t.Fatalf("port=%d", cfg.Server.Port)
 	}
-	if cfg.Providers.ClaudeOAuth.EndpointURL == "" {
-		t.Fatal("missing claude endpoint")
+	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" {
+		t.Fatal("missing claude endpoint/user-agent")
 	}
 	if got := cfg.UsageView.Providers; len(got) != 3 || got[0] != "claude-code" {
 		t.Fatalf("providers=%v", got)

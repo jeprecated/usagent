@@ -11,6 +11,7 @@ providers:
     credentialsPath: "~/.claude/.credentials.json"
     endpointUrl: "https://api.anthropic.com/api/oauth/usage"
     betaHeader: "oauth-2025-04-20"
+    userAgent: "claude-code/2.0"
     refreshMs: 300000
     staleMs: 900000
 

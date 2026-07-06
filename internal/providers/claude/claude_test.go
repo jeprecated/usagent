@@ -19,9 +19,12 @@ func TestClaudeFetchNormalizesOAuthLimits(t *testing.T) {
 	if err := os.WriteFile(credPath, []byte(`{"claudeAiOauth":{"accessToken":"secret-token"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var auth string
+	var auth, userAgent, anthropicVersion, contentType string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("authorization")
+		userAgent = r.Header.Get("user-agent")
+		anthropicVersion = r.Header.Get("anthropic-version")
+		contentType = r.Header.Get("content-type")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"limits": []map[string]any{
 				{"kind": "session", "percent": 12.4, "resets_at": "2026-07-06T12:00:00Z"},
@@ -33,13 +36,16 @@ func TestClaudeFetchNormalizesOAuthLimits(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	p := New(config.ClaudeOAuthConfig{CredentialsPath: credPath, EndpointURL: srv.URL, BetaHeader: "oauth-test", RefreshMs: 1000, StaleMs: 2000})
+	p := New(config.ClaudeOAuthConfig{CredentialsPath: credPath, EndpointURL: srv.URL, BetaHeader: "oauth-test", UserAgent: "claude-code/test", RefreshMs: 1000, StaleMs: 2000})
 	res, err := p.Fetch(context.Background(), time.UnixMilli(1000))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if auth != "Bearer secret-token" {
 		t.Fatalf("authorization header not set")
+	}
+	if userAgent != "claude-code/test" || anthropicVersion != "2023-06-01" || contentType != "application/json" {
+		t.Fatalf("headers user-agent=%q anthropic-version=%q content-type=%q", userAgent, anthropicVersion, contentType)
 	}
 	if len(res.Items) != 4 {
 		t.Fatalf("items=%+v", res.Items)

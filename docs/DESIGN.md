@@ -45,6 +45,8 @@ Claude subscription usage is polled directly from the Claude Code OAuth usage en
 GET https://api.anthropic.com/api/oauth/usage
 Authorization: Bearer <runtime credentials claudeAiOauth.accessToken>
 anthropic-beta: oauth-2025-04-20
+anthropic-version: 2023-06-01
+User-Agent: claude-code/2.0
 ```
 
 The response is normalized as follows:

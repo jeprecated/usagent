@@ -79,7 +79,12 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	}
 	req.Header.Set("authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", p.cfg.BetaHeader)
+	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("accept", "application/json")
+	req.Header.Set("content-type", "application/json")
+	if p.cfg.UserAgent != "" {
+		req.Header.Set("user-agent", p.cfg.UserAgent)
+	}
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return providers.Result{}, err

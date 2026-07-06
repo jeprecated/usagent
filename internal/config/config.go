@@ -51,6 +51,7 @@ type ClaudeOAuthConfig struct {
 	CredentialsPath string `yaml:"credentialsPath"`
 	EndpointURL     string `yaml:"endpointUrl"`
 	BetaHeader      string `yaml:"betaHeader"`
+	UserAgent       string `yaml:"userAgent"`
 	RefreshMs       int64  `yaml:"refreshMs"`
 	StaleMs         int64  `yaml:"staleMs"`
 }
@@ -280,6 +281,9 @@ func normalizeProviderDefaults(cfg Config) Config {
 	}
 	if cfg.Providers.ClaudeOAuth.BetaHeader == "" {
 		cfg.Providers.ClaudeOAuth.BetaHeader = "oauth-2025-04-20"
+	}
+	if cfg.Providers.ClaudeOAuth.UserAgent == "" {
+		cfg.Providers.ClaudeOAuth.UserAgent = "claude-code/2.0"
 	}
 	if cfg.Providers.ClaudeOAuth.RefreshMs <= 0 {
 		cfg.Providers.ClaudeOAuth.RefreshMs = cfg.Quota.RefreshMs
