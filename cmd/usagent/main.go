@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,22 +26,28 @@ func main() {
 }
 
 func run(args []string) error {
+	return runWithIO(args, os.Stdout, os.Stderr)
+}
+
+func runWithIO(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return cli.RunUsage(context.Background(), nil, os.Stdout, os.Stderr)
+		return cli.RunUsage(context.Background(), nil, stdout, stderr)
 	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "usage", "status":
 			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(os.Stdout, "usagent usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
+				fmt.Fprint(stdout, "usagent usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
 				return nil
 			}
-			return cli.RunUsage(context.Background(), args[1:], os.Stdout, os.Stderr)
+			return cli.RunUsage(context.Background(), args[1:], stdout, stderr)
 		case "serve":
 			args = args[1:]
 		case "help", "-h", "--help":
-			fmt.Fprint(os.Stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
+			fmt.Fprint(stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
 			return nil
+		default:
+			return cli.RunUsage(context.Background(), args, stdout, stderr)
 		}
 	}
 	opts, err := config.ParseFlags(args)
