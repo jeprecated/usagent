@@ -12,7 +12,8 @@ RUN adduser -S -u 10001 usagent && apk add --no-cache ca-certificates wget
 
 ENV USAGENT_CONFIG=/etc/usagent/config.yaml \
     USAGENT_HOST=0.0.0.0 \
-    USAGENT_PORT=8787
+    USAGENT_PORT=8787 \
+    XDG_STATE_HOME=/var/lib/usagent
 
 COPY --from=build /out/usagent /usr/local/bin/usagent
 COPY config.example.yaml /etc/usagent/config.yaml
