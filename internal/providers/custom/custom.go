@@ -79,7 +79,8 @@ func (p *Provider) fetchEndpoint(ctx context.Context, now time.Time, ep config.C
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, ratelimit.RetryAfter(resp.Header, now), fmt.Errorf("custom provider %s endpoint %s returned HTTP %d", p.ID(), ep.ID, resp.StatusCode)
+		retry := ratelimit.RetryAfter(resp.Header, now)
+		return nil, retry, providers.HTTPStatusError(fmt.Sprintf("custom provider %s endpoint %s", p.ID(), ep.ID), resp.StatusCode, retry, resp.Body)
 	}
 	var root any
 	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {

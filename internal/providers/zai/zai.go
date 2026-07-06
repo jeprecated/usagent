@@ -90,7 +90,8 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return providers.Result{RetryAfter: ratelimit.RetryAfter(resp.Header, now)}, fmt.Errorf("z.ai quota returned HTTP %d", resp.StatusCode)
+		retry := ratelimit.RetryAfter(resp.Header, now)
+		return providers.Result{RetryAfter: retry}, providers.HTTPStatusError("z.ai quota", resp.StatusCode, retry, resp.Body)
 	}
 	var pl payload
 	if err := json.NewDecoder(resp.Body).Decode(&pl); err != nil {

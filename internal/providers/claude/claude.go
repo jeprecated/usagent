@@ -86,7 +86,8 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return providers.Result{RetryAfter: ratelimit.AnthropicRetryAfter(resp.Header, now)}, fmt.Errorf("claude oauth usage returned HTTP %d", resp.StatusCode)
+		retry := ratelimit.AnthropicRetryAfter(resp.Header, now)
+		return providers.Result{RetryAfter: retry}, providers.HTTPStatusError("claude oauth usage", resp.StatusCode, retry, resp.Body)
 	}
 	var payload usagePayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {

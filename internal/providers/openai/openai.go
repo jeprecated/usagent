@@ -121,8 +121,9 @@ func (p *Provider) fetchCosts(ctx context.Context, now time.Time, apiKey string,
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			retry := ratelimit.RetryAfter(resp.Header, now)
+			err := providers.HTTPStatusError("openai costs", resp.StatusCode, retry, resp.Body)
 			_ = resp.Body.Close()
-			return nil, retry, fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
+			return nil, retry, err
 		}
 		var payload costsPayload
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
