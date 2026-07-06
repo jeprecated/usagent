@@ -25,4 +25,4 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8787/healthz >/dev/null || exit 1
 
-CMD ["usagent"]
+CMD ["usagent", "serve"]

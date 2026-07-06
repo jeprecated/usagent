@@ -25,6 +25,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 0 {
+		return cli.RunUsage(context.Background(), nil, os.Stdout, os.Stderr)
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "usage", "status":
@@ -36,7 +39,7 @@ func run(args []string) error {
 		case "serve":
 			args = args[1:]
 		case "help", "-h", "--help":
-			fmt.Fprint(os.Stdout, "usagent usage: usagent [serve] [--config PATH] [--host HOST] [--port PORT]\n              usagent usage [--config PATH] [--json] [--offline] [--timeout 10s]\n")
+			fmt.Fprint(os.Stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
 			return nil
 		}
 	}

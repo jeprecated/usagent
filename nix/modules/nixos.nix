@@ -98,7 +98,7 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       serviceConfig = {
-        ExecStart = "${lib.getExe cfg.package} --config ${generatedConfig}";
+        ExecStart = "${lib.getExe cfg.package} serve --config ${generatedConfig}";
         Restart = "on-failure";
         DynamicUser = true;
         StateDirectory = cfg.stateDir;

@@ -14,8 +14,8 @@
   env.USAGENT_HOST = "127.0.0.1";
   env.USAGENT_PORT = "8787";
 
-  scripts.start.exec = "go run ./cmd/usagent --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
-  scripts.dev.exec = "go run ./cmd/usagent --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
+  scripts.start.exec = "go run ./cmd/usagent serve --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
+  scripts.dev.exec = "go run ./cmd/usagent serve --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
   scripts.check.exec = "go test ./...";
   scripts.usage.exec = "go run ./cmd/usagent usage --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
 
@@ -29,7 +29,7 @@ print(s.getsockname()[1])
 s.close()
 PY
 )
-    XDG_STATE_HOME=$(mktemp -d) go run ./cmd/usagent --config config.example.yaml --host 127.0.0.1 --port "$port" > /tmp/usagent-test.log 2>&1 &
+    XDG_STATE_HOME=$(mktemp -d) go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port "$port" > /tmp/usagent-test.log 2>&1 &
     pid=$!
     trap 'kill $pid 2>/dev/null || true' EXIT
     for i in $(seq 1 50); do

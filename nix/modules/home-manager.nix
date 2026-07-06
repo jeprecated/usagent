@@ -94,7 +94,7 @@ in
         After = [ "network-online.target" ];
       };
       Service = {
-        ExecStart = "${lib.getExe cfg.package} --config ${generatedConfig}";
+        ExecStart = "${lib.getExe cfg.package} serve --config ${generatedConfig}";
         Restart = "on-failure";
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
       };

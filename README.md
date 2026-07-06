@@ -9,7 +9,7 @@ Standalone Go usage/quota microservice for agent providers.
 ```sh
 devenv shell
 check                 # go test ./...
-start                 # go run ./cmd/usagent --config config.example.yaml
+start                 # go run ./cmd/usagent serve --config config.example.yaml
 usage                 # go run ./cmd/usagent usage --config config.example.yaml
 ```
 
@@ -17,15 +17,16 @@ Without devenv:
 
 ```sh
 go test ./...
-go run ./cmd/usagent --config config.example.yaml --host 127.0.0.1 --port 8787
+go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787
 go run ./cmd/usagent usage --config config.example.yaml
 ```
 
 ## CLI usage summary
 
-`usagent usage` prints remaining quota for all providers in the configured usage view. It first calls the running daemon's `/v1/usage` endpoint; if the daemon is unavailable, it loads the same config/state and refreshes due providers locally.
+`usagent` or `usagent usage` prints remaining quota for all providers in the configured usage view. It first calls the running daemon's `/v1/usage` endpoint; if the daemon is unavailable, it loads the same config/state and refreshes due providers locally. Use `usagent serve` to run the daemon.
 
 ```sh
+usagent
 usagent usage --config ~/.config/usagent/config.yaml
 usagent usage --json
 usagent usage --offline  # skip daemon lookup and refresh/read locally
