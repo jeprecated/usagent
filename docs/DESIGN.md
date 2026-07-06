@@ -2,23 +2,34 @@
 
 ## Goal
 
-Extract agent usage/quota tracking from the Noctalia/pi-session-monitor integration into a standalone microservice that can run via Docker or Nix. The service fetches provider usage on a schedule and exposes normalized usage as JSON for any client.
+`usagent` is a standalone Go microservice that fetches provider usage on a schedule and exposes normalized schema-version-2 usage JSON for Noctalia or any other client.
 
 ## Architecture
 
 ```text
-Claude Code OAuth usage API ──poll────────────────────────────┐
-OpenAI Admin API ──poll───────────────────────────────────────┤
-z.ai quota endpoint ──poll────────────────────────────────────┤
-                                                               ▼
-                                                        usagent store
-                                                               ▼
-                                 GET /v1/usage, /v1/providers, /healthz
-                                                               ▼
-                                                     Noctalia usage widget
+Claude Code OAuth usage API ──refresh loop───────────────┐
+OpenAI placeholder provider ──refresh loop───────────────┤
+z.ai placeholder provider ───refresh loop────────────────┤
+                                                          ▼
+                                         in-memory snapshot cache
+                                                          │
+                                         atomic JSON state snapshot
+                                                          ▼
+                            GET /v1/usage, /v1/providers, /healthz
+                                                          ▼
+                                                Noctalia usage widget
 ```
 
-The existing Pi session tracker remains separate and does not render usage.
+Package layout:
+
+- `cmd/usagent` wires config, state load, refresh loop, and HTTP serving.
+- `internal/config` parses YAML, flags, env overrides, validation, `~`, and `%STATE%` expansion.
+- `internal/model` owns the schema v2 response structs.
+- `internal/cache` owns current provider snapshots, stale/error metadata, and atomic disk persistence.
+- `internal/providers` defines the provider interface.
+- `internal/providers/claude` implements Claude Code OAuth fetching and normalization.
+- `internal/providers/noop` keeps OpenAI and z.ai metadata stable until their real fetchers are added.
+- `internal/httpapi` exposes the stable HTTP contract.
 
 ## Provider sources
 
@@ -28,43 +39,38 @@ Claude subscription usage is polled directly from the Claude Code OAuth usage en
 
 ```text
 GET https://api.anthropic.com/api/oauth/usage
-Authorization: Bearer <~/.claude/.credentials.json claudeAiOauth.accessToken>
+Authorization: Bearer <runtime credentials claudeAiOauth.accessToken>
 anthropic-beta: oauth-2025-04-20
 ```
 
-The verified response includes `limits[]` entries for:
+The response `limits[]` entries are normalized as follows:
 
 - `kind: "session"` → current 5h/session bucket.
 - `kind: "weekly_all"` → current week, all models.
-- `kind: "weekly_scoped"` with `scope.model.display_name: "Fable"` → current week, Fable.
+- `kind: "weekly_scoped"` with model display/id containing `Fable` → current week, Fable.
 
-There is no POST source path. Do not fabricate missing buckets.
+Missing buckets are not fabricated. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses.
 
-OAuth usage responses are cached in memory and persisted to `server.statePath`. `/v1/usage` must not call the Anthropic endpoint on every widget poll. If a refresh is rate-limited or otherwise fails after a successful fetch, `usagent` serves the last cached OAuth quota items.
+If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 
-### OpenAI
+### OpenAI and z.ai
 
-Use Admin/Organization usage and cost APIs. Config defines budgets/windows for session-ish/hourly, weekly, and monthly views.
+OpenAI and z.ai are currently placeholder providers that return no quota items while preserving provider metadata in `/v1/usage` and `/v1/providers`.
 
-### z.ai
+## Cache and refresh behavior
 
-Use the real quota endpoint:
-
-```text
-https://api.z.ai/api/monitor/usage/quota/limit
-```
-
-Normalize token/session/weekly windows. Exclude web-search/TIME_LIMIT from the bar by default.
+HTTP callers never synchronously call provider APIs. The refresh loop checks provider `nextRefreshAt`, starts at most one in-flight refresh per provider, applies `refreshMs`/`staleMs`, and saves successful snapshots atomically to `server.statePath`. On startup the snapshot is loaded before serving.
 
 ## JSON contract
 
-`GET /v1/usage` returns:
+`GET /v1/usage` returns schema version 2:
 
 ```json
 {
   "schemaVersion": 2,
   "service": "usagent",
   "generatedAt": 1783287000000,
+  "startedAt": 1783286900000,
   "stale": false,
   "providers": [
     {
@@ -77,10 +83,10 @@ Normalize token/session/weekly windows. Exclude web-search/TIME_LIMIT from the b
   ],
   "quotaItems": [
     {
-      "id": "claude-code-5h",
+      "id": "claude-code-oauth-session",
       "provider": "claude-code",
-      "label": "Claude session",
-      "window": { "id": "session", "label": "S", "kind": "rolling", "resetAt": 1783289000000 },
+      "label": "Claude 5h",
+      "window": { "id": "session", "label": "S", "kind": "rolling" },
       "unit": "percent",
       "limit": 100,
       "used": 10,
@@ -94,30 +100,7 @@ Normalize token/session/weekly windows. Exclude web-search/TIME_LIMIT from the b
 }
 ```
 
-`quotaItems` intentionally remains compatible with the current pi-meta `QuotaItem` shape.
-
-## Config principles
-
-- Config controls providers, windows, percent mode, reset display, and visibility.
-- Config contains no plaintext secrets.
-- Missing metrics render as unavailable/hidden depending on `hideUnavailable`.
-- Web-search quota is excluded from z.ai bar output by default.
-
-## Suggested UI default
-
-Provider-first, remaining-percent mode:
-
-```text
-Usage: Claude S:100% W:50% F:24% R:134m · OpenAI W:50% M:70% · z.ai S:90% W:97%
-```
-
-Configurable alternatives:
-
-```text
-Usage: C S100 W50 F24 · O W50 M70 · Z S90 W97
-Usage: S C100 O— Z90 · W C50 F24 O50 Z97 · M O70
-Usage: Claude F:24% R:134m · OpenAI M:70% · z.ai W:97%
-```
+`GET /v1/providers` returns `{ "providers": [...] }` using the same provider objects.
 
 ## Storage
 
@@ -128,36 +111,10 @@ V1 uses:
 
 No database in V1. Add SQLite/history later only if 24h trends are useful.
 
-## Docker
+## Docker and Nix
 
-Runtime image mounts:
+The Dockerfile builds the Go binary in a multi-stage image and runs it without Node.
 
-- `/etc/usagent/config.yaml`
-- `/run/secrets/*` or env vars
-- optional state volume `/var/lib/usagent`
+The flake exposes `packages.default`, `packages.usagent`, `packages.oci`, `apps.default`, `nixosModules.usagent`, and `homeManagerModules.usagent`.
 
-## Nix
-
-Expose:
-
-- `packages.default`
-- `packages.usagent`
-- `packages.oci`
-- `nixosModules.usagent`
-- `homeManagerModules.usagent`
-
-Secrets should use agenix/sops-nix/runtime files, never Nix store text.
-
-## Migration from pi-meta
-
-1. Port quota core/adapters to `usagent`.
-2. Run `usagent` side-by-side with pi-meta watcher.
-3. Noctalia usage widget reads `GET /v1/usage` instead of local `overview.json` quota fields.
-4. Remove quota polling from pi-session-monitor; keep session tracking there.
-
-## Open questions
-
-1. Is Claude monthly expected to mean Anthropic API monthly spend, or should it be hidden?
-2. Exact OpenAI budget limits and windows.
-3. Exact z.ai session/weekly/monthly semantics; web-search excluded.
-4. Whether Noctalia should use polling or SSE.
+Nix-generated config lives in the store and must not contain plaintext secrets. Use runtime credential paths, systemd credentials, agenix, sops-nix, or an environment file outside the store.

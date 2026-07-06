@@ -11,6 +11,8 @@ providers:
     credentialsPath: "~/.claude/.credentials.json"
     endpointUrl: "https://api.anthropic.com/api/oauth/usage"
     betaHeader: "oauth-2025-04-20"
+    refreshMs: 300000
+    staleMs: 900000
 
 usageView:
   providers: ["claude-code", "openai", "z-ai"]
@@ -27,7 +29,8 @@ quota:
   providers:
     - id: "claude-code"
       label: "Claude"
-      source: "pull"      staleMs: 600000
+      source: "pull"
+      staleMs: 600000
       highlightedBucket: "fable"
       highlightedBucketLabel: "Fable"
 

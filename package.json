@@ -2,17 +2,5 @@
   "name": "usagent",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "bin": {
-    "usagent": "src/bin/usagent.mjs"
-  },
-  "scripts": {
-    "start": "node src/bin/usagent.mjs",
-    "dev": "USAGENT_CONFIG=config.example.yaml node --watch src/bin/usagent.mjs",
-    "check": "node --check src/bin/usagent.mjs",
-    "test": "npm run check"
-  },
-  "engines": {
-    "node": ">=24"
-  }
+  "description": "Agent usage/quota microservice. Runtime implementation is Go; package.json is retained only as legacy metadata."
 }

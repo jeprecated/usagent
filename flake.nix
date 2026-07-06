@@ -10,20 +10,14 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        usagent = pkgs.stdenvNoCC.mkDerivation {
+        version = "0.1.0";
+        usagent = pkgs.buildGoModule {
           pname = "usagent";
-          version = "0.1.0";
+          inherit version;
           src = ./.;
-          dontBuild = true;
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/lib/usagent $out/bin
-            cp -R package.json src config.example.yaml $out/lib/usagent/
-            makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/usagent \
-              --add-flags $out/lib/usagent/src/bin/usagent.mjs
-            runHook postInstall
-          '';
-          nativeBuildInputs = [ pkgs.makeWrapper ];
+          vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
+          subPackages = [ "cmd/usagent" ];
+          ldflags = [ "-s" "-w" ];
           meta = {
             description = "Agent usage/quota microservice";
             mainProgram = "usagent";
@@ -32,9 +26,29 @@
       in {
         packages.default = usagent;
         packages.usagent = usagent;
-        apps.default = flake-utils.lib.mkApp { drv = usagent; };
-        devShells.default = pkgs.mkShell {
-          packages = [ pkgs.nodejs_24 pkgs.jujutsu pkgs.devenv pkgs.jq pkgs.curl ];
+        packages.oci = pkgs.dockerTools.buildLayeredImage {
+          name = "usagent";
+          tag = version;
+          contents = [ pkgs.cacert ];
+          config = {
+            User = "10001:10001";
+            ExposedPorts = { "8787/tcp" = {}; };
+            Env = [
+              "USAGENT_CONFIG=/etc/usagent/config.yaml"
+              "USAGENT_HOST=0.0.0.0"
+              "USAGENT_PORT=8787"
+            ];
+            Entrypoint = [ "${usagent}/bin/usagent" ];
+            Labels = { "org.opencontainers.image.title" = "usagent"; };
+          };
         };
-      });
+        apps.default = flake-utils.lib.mkApp { drv = usagent; };
+        apps.usagent = flake-utils.lib.mkApp { drv = usagent; };
+        devShells.default = pkgs.mkShell {
+          packages = [ pkgs.go pkgs.jujutsu pkgs.devenv pkgs.jq pkgs.curl pkgs.docker-client ];
+        };
+      }) // {
+        nixosModules.usagent = import ./nix/modules/nixos.nix self;
+        homeManagerModules.usagent = import ./nix/modules/home-manager.nix self;
+      };
 }
