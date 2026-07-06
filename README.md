@@ -15,7 +15,7 @@ Pi: ● 1 busy · 16 idle · 56 stale · 52 done/1d · AG 3
 A separate usage widget consumes `usagent`:
 
 ```text
-Usage: Claude S:100% W:50% F:24% R:134m · OpenAI W:50% M:70% · z.ai S:90% W:97%
+Usage: Claude S:100% W:50% F:24% [2h14m] · OpenAI W:50% M:70% · z.ai S:90% W:97%
 ```
 
 No z.ai web-search quota in the bar.
@@ -43,3 +43,5 @@ See `config.example.yaml`.
 ## Secrets
 
 Secrets must be provided by runtime env vars or secret files. Do not put tokens in config, Docker images, Nix store paths, or checked-in files.
+
+Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token itself is read at runtime and is never rendered into Nix config.

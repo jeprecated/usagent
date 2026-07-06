@@ -7,10 +7,10 @@ Extract agent usage/quota tracking from the Noctalia/pi-session-monitor integrat
 ## Architecture
 
 ```text
-Claude Code statusLine ──push──► POST /v1/ingest/claude-code ─┐
+Claude Code OAuth usage API ──poll────────────────────────────┐
+Claude Code statusLine ──optional push────────────────────────┤
 OpenAI Admin API ──poll───────────────────────────────────────┤
 z.ai quota endpoint ──poll────────────────────────────────────┤
-Anthropic Admin API ──optional poll────────────────────────────┤
                                                                ▼
                                                         usagent store
                                                                ▼
@@ -25,16 +25,21 @@ The existing Pi session tracker remains separate and does not render usage.
 
 ### Claude Code / Fable
 
-Claude subscription usage is push-based. A standalone service cannot poll Claude Code `/usage` directly. Instead, `usagent-claude-statusline` runs as the Claude Code `statusLine.command`, receives the statusline JSON on stdin, sanitizes it, and POSTs it to `usagent`.
+Claude subscription usage is polled directly from the Claude Code OAuth usage endpoint:
 
-Feasibility:
+```text
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <~/.claude/.credentials.json claudeAiOauth.accessToken>
+anthropic-beta: oauth-2025-04-20
+```
 
-- Session / 5h window: available when statusline payload includes `five_hour`.
-- Weekly / 7d window: available when statusline payload includes `seven_day`.
-- Fable weekly: only available if the statusline payload includes model-scoped Fable rate-limit buckets.
-- Monthly subscription window: not currently known to be available from Claude Code statusline. Do not fabricate it.
+The verified response includes `limits[]` entries for:
 
-If Anthropic Admin API is added, label it as Claude API spend, not Claude Code subscription quota.
+- `kind: "session"` → current 5h/session bucket.
+- `kind: "weekly_all"` → current week, all models.
+- `kind: "weekly_scoped"` with `scope.model.display_name: "Fable"` → current week, Fable.
+
+The statusline ingest endpoint remains optional compatibility plumbing, but Claude quota tracking must prefer the OAuth usage API when it is available. Do not fabricate missing buckets.
 
 ### OpenAI
 

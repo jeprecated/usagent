@@ -7,6 +7,13 @@ server:
     mode: "none"
   statePath: "%STATE%/usagent/snapshot.json"
 
+providers:
+  claudeOAuth:
+    enabled: true
+    credentialsPath: "~/.claude/.credentials.json"
+    endpointUrl: "https://api.anthropic.com/api/oauth/usage"
+    betaHeader: "oauth-2025-04-20"
+
 usageView:
   providers: ["claude-code", "openai", "z-ai"]
   windows: ["session", "weekly", "monthly", "fableWeekly"]

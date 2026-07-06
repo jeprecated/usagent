@@ -2,6 +2,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 
 const configPath = process.env.USAGENT_CONFIG ?? "config.example.yaml";
 const port = Number(process.env.USAGENT_PORT ?? 8787);
@@ -56,6 +57,122 @@ function providerState(provider, items) {
   return "fresh";
 }
 
+function expandHome(path) {
+  if (typeof path !== "string") return path;
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return `${homedir()}/${path.slice(2)}`;
+  return path;
+}
+
+function parseResetAt(value) {
+  if (typeof value !== "string") return undefined;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function claudeOAuthItem({ id, label, windowId, windowLabel, windowKind, usedPercent, resetAt, severity, generatedAt }) {
+  const used = Math.max(0, Math.min(100, Math.round(Number(usedPercent) || 0)));
+  const remaining = Math.max(0, 100 - used);
+  return {
+    id,
+    provider: "claude-code",
+    label,
+    window: {
+      id: windowId,
+      label: windowLabel,
+      kind: windowKind,
+      ...(Number.isFinite(resetAt) ? { resetAt } : {}),
+    },
+    unit: "percent",
+    state: "fresh",
+    severity: severity === "critical" || severity === "error" || severity === "warning" ? severity : "ok",
+    visible: true,
+    refresh: {
+      lastUpdatedAt: generatedAt,
+      source: "provider",
+      nextRefreshAt: generatedAt + 5 * 60 * 1000,
+      staleAt: generatedAt + 10 * 60 * 1000,
+    },
+    ...(Number.isFinite(resetAt) ? { reset: { resetAt, resetWindowId: windowId, source: "provider" } } : {}),
+    limit: 100,
+    used,
+    remaining,
+    percentUsed: used,
+  };
+}
+
+async function claudeOAuthQuotaItems(config, generatedAt) {
+  const providerConfig = config?.providers?.claudeOAuth ?? config?.providers?.claudeCodeOAuth;
+  if (!providerConfig?.enabled) return [];
+  const credentialsPath = expandHome(providerConfig.credentialsPath ?? "~/.claude/.credentials.json");
+  const endpointUrl = providerConfig.endpointUrl ?? "https://api.anthropic.com/api/oauth/usage";
+  const credentials = await loadJson(credentialsPath);
+  const token = credentials?.claudeAiOauth?.accessToken;
+  if (!token) return [];
+
+  const response = await fetch(endpointUrl, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "anthropic-beta": providerConfig.betaHeader ?? "oauth-2025-04-20",
+      accept: "application/json",
+    },
+  });
+  if (!response.ok) return [];
+  const payload = await response.json();
+  const limits = Array.isArray(payload?.limits) ? payload.limits : [];
+  const items = [];
+
+  const session = limits.find((limit) => limit?.kind === "session") ?? payload?.five_hour;
+  if (session) {
+    items.push(claudeOAuthItem({
+      id: "claude-code-oauth-session",
+      label: "Claude 5h",
+      windowId: "5h",
+      windowLabel: "5h",
+      windowKind: "rolling",
+      usedPercent: session.percent ?? session.utilization,
+      resetAt: parseResetAt(session.resets_at),
+      severity: session.severity,
+      generatedAt,
+    }));
+  }
+
+  const weeklyAll = limits.find((limit) => limit?.kind === "weekly_all") ?? payload?.seven_day;
+  if (weeklyAll) {
+    items.push(claudeOAuthItem({
+      id: "claude-code-oauth-weekly-all",
+      label: "Claude weekly",
+      windowId: "7d",
+      windowLabel: "7d",
+      windowKind: "weekly",
+      usedPercent: weeklyAll.percent ?? weeklyAll.utilization,
+      resetAt: parseResetAt(weeklyAll.resets_at),
+      severity: weeklyAll.severity,
+      generatedAt,
+    }));
+  }
+
+  const fableWeekly = limits.find((limit) =>
+    limit?.kind === "weekly_scoped" &&
+    String(limit?.scope?.model?.display_name ?? limit?.scope?.model?.id ?? "").toLowerCase().includes("fable")
+  );
+  if (fableWeekly) {
+    items.push(claudeOAuthItem({
+      id: "claude-code-oauth-fable-weekly",
+      label: "Claude Fable weekly",
+      windowId: "fable-weekly",
+      windowLabel: "Fable weekly",
+      windowKind: "weekly",
+      usedPercent: fableWeekly.percent,
+      resetAt: parseResetAt(fableWeekly.resets_at),
+      severity: fableWeekly.severity,
+      generatedAt,
+    }));
+  }
+
+  return items;
+}
+
 async function legacyQuotaItems(config) {
   const path = config?.legacySources?.piSessionMonitorOverviewFile;
   if (!path) return [];
@@ -66,13 +183,17 @@ async function legacyQuotaItems(config) {
 async function usageOverview() {
   const generatedAt = Date.now();
   const config = await loadConfig();
-  const quotaItems = await legacyQuotaItems(config);
+  const legacyItems = await legacyQuotaItems(config);
+  const claudeOAuthItems = await claudeOAuthQuotaItems(config, generatedAt).catch(() => []);
+  const quotaItems = claudeOAuthItems.length > 0
+    ? [...legacyItems.filter((item) => item.provider !== "claude-code"), ...claudeOAuthItems]
+    : legacyItems;
   const providerIds = config?.usageView?.providers ?? ["claude-code", "openai", "z-ai"];
   const providers = providerIds.map((id) => ({
     id,
     label: providerLabel(id),
     state: providerState(id, quotaItems),
-    source: id === "claude-code" ? "push" : "pull",
+    source: id === "claude-code" && claudeOAuthItems.length === 0 ? "push" : "pull",
     lastUpdatedAt: quotaItems.filter((item) => item.provider === id).map((item) => item.refresh?.lastUpdatedAt).filter(Number.isFinite).sort((a, b) => b - a)[0],
   }));
 
