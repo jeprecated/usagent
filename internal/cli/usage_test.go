@@ -79,12 +79,52 @@ func splitServer(t *testing.T, rawURL string) (string, int) {
 	return host, port
 }
 
+func TestRunUsageTriesUserDaemonConfigBeforeLocalFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/usage" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"schemaVersion":2,"service":"usagent","generatedAt":1,"startedAt":1,"stale":false,"providers":[{"id":"daemon","label":"Daemon","state":"fresh","source":"pull"}],"quotaItems":[{"id":"daemon-session","provider":"daemon","label":"Daemon session","window":{"id":"session","label":"S","kind":"rolling"},"unit":"percent","limit":100,"used":1,"remaining":99,"percentUsed":1,"state":"fresh","severity":"ok","visible":true}]}`)
+	}))
+	defer srv.Close()
+	host, port := splitServer(t, srv.URL)
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	userConfigPath := filepath.Join(dir, "usagent", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(userConfigPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfigPath, []byte(fmt.Sprintf(`server: {host: %q, port: %d, readAuth: {mode: none}}
+usageView: {providers: [daemon]}
+`, host, port)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	primaryConfigPath := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(primaryConfigPath, []byte(`server: {host: "127.0.0.1", port: 1, readAuth: {mode: none}}
+usageView: {providers: [bad]}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := RunUsage(context.Background(), []string{"--config", primaryConfigPath, "--timeout", "2s"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "Daemon: S 99% remaining\n" {
+		t.Fatalf("stdout=%q stderr=%q", got, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
 func TestRunUsageFallsBackToLocalRefreshWhenDaemonUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"items":[{"id":"alpha","label":"Alpha","window":{"id":"week","label":"W","kind":"weekly"},"unit":"tokens","limit":100,"used":25,"remaining":75,"percentUsed":25}]}`)
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	configPath := filepath.Join(dir, "config.yaml")
 	statePath := filepath.Join(dir, "snapshot.json")
 	configText := fmt.Sprintf(`server:

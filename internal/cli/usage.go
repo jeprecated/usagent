@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -51,8 +51,15 @@ func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Wr
 		if err == nil {
 			return writeUsage(stdout, usage, opts.JSON)
 		}
+		primaryErr := err
+		if fallback, ok := loadUserDaemonConfig(opts.ConfigPath); ok {
+			usage, err = FetchUsageFromDaemon(ctx, fallback, opts.Timeout)
+			if err == nil {
+				return writeUsage(stdout, usage, opts.JSON)
+			}
+		}
 		if stderr != nil {
-			_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, refreshing locally: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, refreshing locally: %v\n", primaryErr)
 		}
 	}
 	usage, err = LocalUsage(ctx, cfg, opts.Timeout)
@@ -65,7 +72,7 @@ func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Wr
 func parseUsageFlags(args []string) (UsageOptions, error) {
 	fs := flag.NewFlagSet("usagent usage", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	opts := UsageOptions{ConfigPath: config.DefaultConfigPath(), Host: os.Getenv("USAGENT_HOST"), Port: envInt("USAGENT_PORT", 0), Timeout: 10 * time.Second}
+	opts := UsageOptions{ConfigPath: config.DefaultConfigPath(), Timeout: 10 * time.Second}
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
 	fs.StringVar(&opts.Host, "host", opts.Host, "daemon listen host override")
 	fs.IntVar(&opts.Port, "port", opts.Port, "daemon listen port override")
@@ -79,6 +86,30 @@ func parseUsageFlags(args []string) (UsageOptions, error) {
 		return opts, fmt.Errorf("unexpected usage arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	return opts, nil
+}
+
+func loadUserDaemonConfig(primaryPath string) (config.Config, bool) {
+	path, ok := userConfigPath()
+	if !ok || path == primaryPath {
+		return config.Config{}, false
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return config.Config{}, false
+	}
+	return cfg, true
+}
+
+func userConfigPath() (string, bool) {
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return "", false
+	}
+	path := filepath.Join(dir, "usagent", "config.yaml")
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 func FetchUsageFromDaemon(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, error) {
@@ -233,16 +264,4 @@ func clientHost(host string) string {
 	default:
 		return host
 	}
-}
-
-func envInt(k string, d int) int {
-	v := os.Getenv(k)
-	if v == "" {
-		return d
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return d
-	}
-	return n
 }
