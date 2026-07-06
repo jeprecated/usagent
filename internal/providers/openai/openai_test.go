@@ -24,10 +24,10 @@ func TestOpenAICostNormalizationWeeklyMonthlyMultiBucketAndPagination(t *testing
 			t.Fatalf("query=%s", r.URL.RawQuery)
 		}
 		if r.URL.Query().Get("after") == "" {
-			fmt.Fprint(w, `{"data":[{"results":[{"amount":{"value":2.25,"currency":"usd"}},{"amount":{"value":1.25,"currency":"usd"}}]}],"next_page":"p2"}`)
+			fmt.Fprint(w, `{"data":[{"start_time":1699913600,"end_time":1700000000,"results":[{"amount":{"value":2.25,"currency":"usd"}},{"amount":{"value":1.25,"currency":"usd"}}]}],"next_page":"p2"}`)
 			return
 		}
-		fmt.Fprint(w, `{"data":[{"results":[{"amount":{"value":3.50,"currency":"usd"}}]}]}`)
+		fmt.Fprint(w, `{"data":[{"start_time":1697408000,"end_time":1697494400,"results":[{"amount":{"value":3.50,"currency":"usd"}}]}]}`)
 	}))
 	defer srv.Close()
 	cfg := config.OpenAIConfig{Enabled: true, CostsEndpoint: srv.URL, APIKeyEnv: "OPENAI_ADMIN_KEY", Budgets: []config.Budget{
@@ -38,14 +38,14 @@ func TestOpenAICostNormalizationWeeklyMonthlyMultiBucketAndPagination(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 4 {
+	if requests != 2 {
 		t.Fatalf("requests=%d", requests)
 	}
 	if len(res.Items) != 2 {
 		t.Fatalf("items=%+v", res.Items)
 	}
 	weekly := res.Items[0]
-	if weekly.ID != "openai-cost-weekly-usd" || weekly.Provider != "openai" || weekly.Unit != "usd" || weekly.Limit != 14 || weekly.Used != 7 || weekly.Remaining != 7 || weekly.PercentUsed != 50 || weekly.Window.Kind != "weekly" || weekly.Window.Label != "W" {
+	if weekly.ID != "openai-cost-weekly-usd" || weekly.Provider != "openai" || weekly.Unit != "usd" || weekly.Limit != 14 || weekly.Used != 3.5 || weekly.Remaining != 10.5 || weekly.PercentUsed != 25 || weekly.Window.Kind != "weekly" || weekly.Window.Label != "W" {
 		t.Fatalf("weekly=%+v", weekly)
 	}
 	monthly := res.Items[1]

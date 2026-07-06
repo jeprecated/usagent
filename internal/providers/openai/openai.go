@@ -69,29 +69,30 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	if len(p.cfg.Budgets) == 0 {
 		return providers.Result{Items: []model.QuotaItem{}}, nil
 	}
+	start, end := budgetRange(now, p.cfg.Budgets)
+	buckets, retry, err := p.fetchCosts(ctx, now, apiKey, start, end)
+	if err != nil {
+		return providers.Result{RetryAfter: retry}, err
+	}
 	items := make([]model.QuotaItem, 0, len(p.cfg.Budgets))
 	for _, b := range p.cfg.Budgets {
-		used, retry, err := p.fetchBudgetCost(ctx, now, apiKey, b)
-		if err != nil {
-			return providers.Result{RetryAfter: retry}, err
-		}
-		items = append(items, NormalizeBudget(b, used))
+		budgetStart, budgetEnd := windowBounds(now, b)
+		items = append(items, NormalizeBudget(b, sumCosts(buckets, b.Unit, budgetStart, budgetEnd)))
 	}
 	return providers.Result{Items: items}, nil
 }
 
-func (p *Provider) fetchBudgetCost(ctx context.Context, now time.Time, apiKey string, b config.Budget) (float64, time.Duration, error) {
+func (p *Provider) fetchCosts(ctx context.Context, now time.Time, apiKey string, start, end time.Time) ([]costBucket, time.Duration, error) {
 	endpoint := p.costsEndpoint()
-	var used float64
+	buckets := []costBucket{}
 	page := ""
 	seen := map[string]bool{}
 	for pages := 0; pages < maxPages; pages++ {
 		u, err := url.Parse(endpoint)
 		if err != nil {
-			return 0, 0, err
+			return nil, 0, err
 		}
 		q := u.Query()
-		start, end := windowBounds(now, b)
 		q.Set("start_time", fmt.Sprintf("%d", start.Unix()))
 		q.Set("end_time", fmt.Sprintf("%d", end.Unix()))
 		q.Set("bucket_width", "1d")
@@ -110,38 +111,38 @@ func (p *Provider) fetchBudgetCost(ctx context.Context, now time.Time, apiKey st
 		u.RawQuery = q.Encode()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 		if err != nil {
-			return 0, 0, err
+			return nil, 0, err
 		}
 		req.Header.Set("authorization", "Bearer "+apiKey)
 		req.Header.Set("accept", "application/json")
 		resp, err := p.client.Do(req)
 		if err != nil {
-			return 0, 0, err
+			return nil, 0, err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			retry := ratelimit.RetryAfter(resp.Header, now)
 			_ = resp.Body.Close()
-			return 0, retry, fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
+			return nil, retry, fmt.Errorf("openai costs returned HTTP %d", resp.StatusCode)
 		}
 		var payload costsPayload
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			_ = resp.Body.Close()
-			return 0, 0, err
+			return nil, 0, err
 		}
 		if err := resp.Body.Close(); err != nil {
-			return 0, 0, err
+			return nil, 0, err
 		}
-		used += sumCosts(payload, b.Unit)
+		buckets = append(buckets, payload.Data...)
 		if payload.NextPage == "" {
-			return used, 0, nil
+			return buckets, 0, nil
 		}
 		if seen[payload.NextPage] {
-			return used, 0, errors.New("openai costs pagination loop detected")
+			return buckets, 0, errors.New("openai costs pagination loop detected")
 		}
 		seen[payload.NextPage] = true
 		page = payload.NextPage
 	}
-	return used, 0, fmt.Errorf("openai costs exceeded pagination limit %d", maxPages)
+	return buckets, 0, fmt.Errorf("openai costs exceeded pagination limit %d", maxPages)
 }
 
 func (p *Provider) costsEndpoint() string {
@@ -154,10 +155,13 @@ func (p *Provider) costsEndpoint() string {
 	return defaultCostsEndpoint
 }
 
-func sumCosts(payload costsPayload, unit string) float64 {
+func sumCosts(buckets []costBucket, unit string, start, end time.Time) float64 {
 	var used float64
 	want := strings.ToLower(unit)
-	for _, bucket := range payload.Data {
+	for _, bucket := range buckets {
+		if !bucketOverlapsWindow(bucket, start, end) {
+			continue
+		}
 		for _, result := range bucket.Results {
 			currency := strings.ToLower(result.Amount.Currency)
 			if want == "" || currency == "" || currency == want {
@@ -166,6 +170,18 @@ func sumCosts(payload costsPayload, unit string) float64 {
 		}
 	}
 	return used
+}
+
+func bucketOverlapsWindow(bucket costBucket, start, end time.Time) bool {
+	if bucket.StartTime == 0 && bucket.EndTime == 0 {
+		return true
+	}
+	bucketStart := time.Unix(bucket.StartTime, 0)
+	bucketEnd := time.Unix(bucket.EndTime, 0)
+	if bucket.EndTime == 0 {
+		bucketEnd = bucketStart.Add(24 * time.Hour)
+	}
+	return bucketEnd.After(start) && bucketStart.Before(end)
 }
 
 func NormalizeBudget(b config.Budget, used float64) model.QuotaItem {
@@ -214,6 +230,23 @@ func windowMetadata(b config.Budget) (id, label, kind string) {
 		}
 	}
 	return id, label, kind
+}
+
+func budgetRange(now time.Time, budgets []config.Budget) (time.Time, time.Time) {
+	if len(budgets) == 0 {
+		return now, now
+	}
+	start, end := windowBounds(now, budgets[0])
+	for _, b := range budgets[1:] {
+		bStart, bEnd := windowBounds(now, b)
+		if bStart.Before(start) {
+			start = bStart
+		}
+		if bEnd.After(end) {
+			end = bEnd
+		}
+	}
+	return start, end
 }
 
 func windowBounds(now time.Time, b config.Budget) (time.Time, time.Time) {
