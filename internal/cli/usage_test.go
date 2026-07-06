@@ -30,6 +30,15 @@ func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {
 	}
 }
 
+func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
+	usage := model.Usage{Providers: []model.Provider{{ID: "openai", Label: "OpenAI", State: model.ProviderStateError, Error: &model.ItemError{Message: "openai costs returned HTTP 500"}}}}
+	got := FormatUsage(usage)
+	want := "OpenAI: unavailable [error: openai costs returned HTTP 500]\n"
+	if got != want {
+		t.Fatalf("FormatUsage()=%q want %q", got, want)
+	}
+}
+
 func TestFetchUsageFromDaemon(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/usage" {

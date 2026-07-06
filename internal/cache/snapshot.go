@@ -121,7 +121,10 @@ func (s *Store) MarkFailure(id, label string, now time.Time, retryAfter time.Dur
 	nowMs := now.UnixMilli()
 	next := nowMs + refreshMs
 	if retryAfter > 0 {
-		next = now.Add(retryAfter).UnixMilli()
+		retryNext := now.Add(retryAfter).UnixMilli()
+		if retryNext > next {
+			next = retryNext
+		}
 	}
 	errorInfo := &model.ItemError{Provider: id, Code: "refresh_failed", Message: err.Error(), LastOccurredAt: nowMs, Recoverable: true}
 	s.mu.Lock()
@@ -200,10 +203,10 @@ func (s *Store) Overview(now time.Time, providerOrder []model.Provider) model.Us
 	for _, base := range providerOrder {
 		ps := snap.Providers[base.ID]
 		state := model.ProviderStateStale
-		if len(ps.Items) == 0 {
-			state = model.ProviderStateStale
-		} else if ps.LastError != nil {
+		if ps.LastError != nil {
 			state = model.ProviderStateError
+		} else if len(ps.Items) == 0 {
+			state = model.ProviderStateStale
 		} else {
 			state = model.ProviderStateFresh
 			for _, it := range ps.Items {
@@ -220,7 +223,7 @@ func (s *Store) Overview(now time.Time, providerOrder []model.Provider) model.Us
 			v := ps.LastUpdatedAt
 			last = &v
 		}
-		providersOut = append(providersOut, model.Provider{ID: base.ID, Label: base.Label, State: state, Source: "pull", LastUpdatedAt: last})
+		providersOut = append(providersOut, model.Provider{ID: base.ID, Label: base.Label, State: state, Source: "pull", LastUpdatedAt: last, Error: ps.LastError})
 		items = append(items, ps.Items...)
 	}
 	return model.Usage{SchemaVersion: 2, Service: "usagent", GeneratedAt: now.UnixMilli(), Stale: len(items) == 0, Providers: providersOut, QuotaItems: items}

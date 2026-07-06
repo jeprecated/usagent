@@ -32,6 +32,29 @@ func TestStoreSaveLoadAtomicSnapshot(t *testing.T) {
 	}
 }
 
+func TestFailureWithoutPriorSuccessMarksProviderError(t *testing.T) {
+	store := NewStore("")
+	store.MarkFailure("openai", "OpenAI", time.UnixMilli(1000), 0, errors.New("openai costs returned HTTP 500"), 600000)
+	usage := store.Overview(time.UnixMilli(1000), []model.Provider{{ID: "openai", Label: "OpenAI", Source: "pull"}})
+	if usage.Providers[0].State != model.ProviderStateError || usage.Providers[0].Error == nil {
+		t.Fatalf("provider=%+v", usage.Providers[0])
+	}
+	if store.NeedsRefresh("openai", time.UnixMilli(1000+599999)) {
+		t.Fatal("provider should not refresh again before refresh interval after failure")
+	}
+}
+
+func TestFailureRetryAfterCannotShortenConfiguredRefresh(t *testing.T) {
+	store := NewStore("")
+	store.MarkFailure("claude-code", "Claude", time.UnixMilli(1000), time.Second, errors.New("claude oauth usage returned HTTP 429"), 300000)
+	if store.NeedsRefresh("claude-code", time.UnixMilli(1000+299999)) {
+		t.Fatal("short Retry-After should not cause retry before configured refresh interval")
+	}
+	if !store.NeedsRefresh("claude-code", time.UnixMilli(1000+300000)) {
+		t.Fatal("provider should refresh at configured refresh interval")
+	}
+}
+
 func TestFailureAfterPriorSuccessServesStaleCachedItems(t *testing.T) {
 	for _, tc := range []struct{ id, label string }{{"claude-code", "Claude"}, {"openai", "OpenAI"}, {"z-ai", "z.ai"}, {"custom-one", "Custom"}} {
 		t.Run(tc.id, func(t *testing.T) {

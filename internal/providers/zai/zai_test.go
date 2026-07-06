@@ -30,7 +30,7 @@ func TestZAINormalizesDocumentedFixtureHidesTimeLimitAndReset(t *testing.T) {
 		t.Fatalf("items=%+v", res.Items)
 	}
 	first := res.Items[0]
-	if first.ID != "z-ai-tokens-limit-session" || first.Window.ID != "session" || first.Window.Label != "S" || first.Unit != "tokens" || first.Used != 250 || first.Remaining != 750 || first.Limit != 1000 || first.PercentUsed != 25 || first.Window.ResetAt == nil || *first.Window.ResetAt != reset {
+	if first.ID != "z-ai-tokens-limit-session" || first.Window.ID != "session" || first.Window.Label != "S" || first.Unit != "M tokens" || first.Used != 250 || first.Remaining != 750 || first.Limit != 1000 || first.PercentUsed != 25 || first.Window.ResetAt == nil || *first.Window.ResetAt != reset {
 		t.Fatalf("tokens=%+v", first)
 	}
 	if res.Items[1].Window.ID != "session" || res.Items[1].PercentUsed != 20 {
@@ -38,6 +38,19 @@ func TestZAINormalizesDocumentedFixtureHidesTimeLimitAndReset(t *testing.T) {
 	}
 	if res.Items[2].ID != "z-ai-mystery-limit" || !res.Items[2].Visible {
 		t.Fatalf("unknown=%+v", res.Items[2])
+	}
+}
+
+func TestZAINormalizesTokenLimitUnitAndDerivesRemainingFromPercentage(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	reset := jsonNumber(now.Add(5 * time.Hour).UnixMilli())
+	items := Normalize([]limit{{Type: "TOKENS_LIMIT", Unit: 3, Number: 5, Percentage: floatPtr(13), NextResetTime: &reset}}, config.ZAIConfig{}, now)
+	if len(items) != 1 {
+		t.Fatalf("items=%+v", items)
+	}
+	item := items[0]
+	if item.Unit != "M tokens" || item.Limit != 15 || item.Used != 1.95 || item.Remaining != 13.05 || item.PercentUsed != 13 {
+		t.Fatalf("item=%+v", item)
 	}
 }
 

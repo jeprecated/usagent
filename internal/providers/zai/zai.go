@@ -166,13 +166,19 @@ func Normalize(limits []limit, cfg config.ZAIConfig, now time.Time) []model.Quot
 		if len(visibleOnly) > 0 {
 			visible = visibleOnly[typ]
 		}
-		used := value(l.CurrentValue, value(l.Usage, 0))
-		remaining := value(l.Remaining, math.Max(0, l.Unit*l.Number-used))
-		limitValue := used + remaining
-		if limitValue <= 0 && l.Unit > 0 && l.Number > 0 {
+		limitValue := 0.0
+		if l.Unit > 0 && l.Number > 0 {
 			limitValue = l.Unit * l.Number
 		}
+		used := value(l.CurrentValue, value(l.Usage, 0))
 		percent := value(l.Percentage, 0)
+		if l.CurrentValue == nil && l.Usage == nil && l.Percentage != nil && limitValue > 0 {
+			used = limitValue * percent / 100
+		}
+		remaining := value(l.Remaining, math.Max(0, limitValue-used))
+		if limitValue <= 0 {
+			limitValue = used + remaining
+		}
 		if l.Percentage == nil && limitValue > 0 {
 			percent = used / limitValue * 100
 		}
@@ -225,7 +231,7 @@ func windowForLimit(typ string, l limit, now time.Time) (id, label, kind string)
 func unitFor(typ string) string {
 	switch typ {
 	case "TOKENS_LIMIT":
-		return "tokens"
+		return "M tokens"
 	case "TIMES_LIMIT", "RATE_LIMIT", "SESSION_LIMIT":
 		return "count"
 	default:

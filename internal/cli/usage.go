@@ -152,7 +152,11 @@ func FormatUsage(usage model.Usage) string {
 			state = "stale"
 		}
 		if len(items) == 0 {
-			lines = append(lines, fmt.Sprintf("%s: unavailable [%s]", provider.Label, state))
+			suffix := state
+			if provider.Error != nil && provider.Error.Message != "" {
+				suffix = state + ": " + provider.Error.Message
+			}
+			lines = append(lines, fmt.Sprintf("%s: unavailable [%s]", provider.Label, suffix))
 			continue
 		}
 		parts := make([]string, 0, len(items))

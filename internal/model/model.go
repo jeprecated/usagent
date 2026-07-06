@@ -14,6 +14,7 @@ type Provider struct {
 	State         ProviderState `json:"state"`
 	Source        string        `json:"source"`
 	LastUpdatedAt *int64        `json:"lastUpdatedAt,omitempty"`
+	Error         *ItemError    `json:"error,omitempty"`
 }
 
 type Window struct {
