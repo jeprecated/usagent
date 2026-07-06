@@ -13,14 +13,15 @@ import (
 )
 
 type ProviderSnapshot struct {
-	ID            string            `json:"id"`
-	Label         string            `json:"label"`
-	Source        string            `json:"source"`
-	Items         []model.QuotaItem `json:"items"`
-	NextRefreshAt int64             `json:"nextRefreshAt"`
-	StaleAt       int64             `json:"staleAt"`
-	LastUpdatedAt int64             `json:"lastUpdatedAt"`
-	LastError     *model.ItemError  `json:"lastError,omitempty"`
+	ID                  string            `json:"id"`
+	Label               string            `json:"label"`
+	Source              string            `json:"source"`
+	Items               []model.QuotaItem `json:"items"`
+	NextRefreshAt       int64             `json:"nextRefreshAt"`
+	StaleAt             int64             `json:"staleAt"`
+	LastUpdatedAt       int64             `json:"lastUpdatedAt"`
+	ConsecutiveFailures int               `json:"consecutiveFailures,omitempty"`
+	LastError           *model.ItemError  `json:"lastError,omitempty"`
 }
 
 type Snapshot struct {
@@ -119,13 +120,6 @@ func (s *Store) UpsertSuccess(id, label string, items []model.QuotaItem, now tim
 
 func (s *Store) MarkFailure(id, label string, now time.Time, retryAfter time.Duration, err error, refreshMs int64) {
 	nowMs := now.UnixMilli()
-	next := nowMs + refreshMs
-	if retryAfter > 0 {
-		retryNext := now.Add(retryAfter).UnixMilli()
-		if retryNext > next {
-			next = retryNext
-		}
-	}
 	errorInfo := &model.ItemError{Provider: id, Code: "refresh_failed", Message: err.Error(), LastOccurredAt: nowMs, Recoverable: true}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -133,12 +127,21 @@ func (s *Store) MarkFailure(id, label string, now time.Time, retryAfter time.Dur
 		s.snap.Providers = map[string]ProviderSnapshot{}
 	}
 	ps := s.snap.Providers[id]
+	failures := ps.ConsecutiveFailures + 1
+	next := nowMs + failureRefreshMs(refreshMs, failures)
+	if retryAfter > 0 {
+		retryNext := now.Add(retryAfter).UnixMilli()
+		if retryNext > next {
+			next = retryNext
+		}
+	}
 	if ps.ID == "" {
 		ps.ID = id
 		ps.Label = label
 		ps.Source = "pull"
 	}
 	ps.NextRefreshAt = next
+	ps.ConsecutiveFailures = failures
 	ps.LastError = errorInfo
 	if len(ps.Items) > 0 {
 		for i := range ps.Items {
@@ -236,6 +239,25 @@ func ApplyFetch(store *Store, p providers.Provider, result providers.Result, err
 	}
 	store.UpsertSuccess(p.ID(), p.Label(), result.Items, now, refreshMs, staleMs)
 	return nil
+}
+
+func failureRefreshMs(refreshMs int64, failures int) int64 {
+	if refreshMs <= 0 {
+		refreshMs = int64((5 * time.Minute) / time.Millisecond)
+	}
+	if failures < 1 {
+		failures = 1
+	}
+	factor := int64(1)
+	for i := 1; i < failures && factor < 64; i++ {
+		factor *= 2
+	}
+	backoff := refreshMs * factor
+	capMs := int64((time.Hour) / time.Millisecond)
+	if backoff > capMs {
+		return capMs
+	}
+	return backoff
 }
 
 func cloneItems(in []model.QuotaItem) []model.QuotaItem {

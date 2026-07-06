@@ -55,6 +55,29 @@ func TestFailureRetryAfterCannotShortenConfiguredRefresh(t *testing.T) {
 	}
 }
 
+func TestConsecutiveFailuresBackOffAndSuccessResets(t *testing.T) {
+	store := NewStore("")
+	store.MarkFailure("claude-code", "Claude", time.UnixMilli(1000), 0, errors.New("rate limited"), 300000)
+	if store.NeedsRefresh("claude-code", time.UnixMilli(1000+300000-1)) {
+		t.Fatal("first failure should wait base refresh interval")
+	}
+	store.MarkFailure("claude-code", "Claude", time.UnixMilli(1000+300000), 0, errors.New("rate limited"), 300000)
+	if store.NeedsRefresh("claude-code", time.UnixMilli(1000+300000+600000-1)) {
+		t.Fatal("second consecutive failure should double refresh interval")
+	}
+	if !store.NeedsRefresh("claude-code", time.UnixMilli(1000+300000+600000)) {
+		t.Fatal("provider should be due after doubled backoff")
+	}
+	store.UpsertSuccess("claude-code", "Claude", []model.QuotaItem{{ID: "x", Provider: "claude-code", Label: "X", Visible: true}}, time.UnixMilli(1000+900000), 300000, 900000)
+	store.MarkFailure("claude-code", "Claude", time.UnixMilli(1000+1200000), 0, errors.New("rate limited"), 300000)
+	if store.NeedsRefresh("claude-code", time.UnixMilli(1000+1200000+300000-1)) {
+		t.Fatal("success should reset consecutive failure backoff")
+	}
+	if !store.NeedsRefresh("claude-code", time.UnixMilli(1000+1200000+300000)) {
+		t.Fatal("provider should use base interval after success reset")
+	}
+}
+
 func TestFailureAfterPriorSuccessServesStaleCachedItems(t *testing.T) {
 	for _, tc := range []struct{ id, label string }{{"claude-code", "Claude"}, {"openai", "OpenAI"}, {"z-ai", "z.ai"}, {"custom-one", "Custom"}} {
 		t.Run(tc.id, func(t *testing.T) {
