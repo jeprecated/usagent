@@ -10,14 +10,10 @@
     pkgs.docker-client
   ];
 
-  env.USAGENT_CONFIG = "config.example.yaml";
-  env.USAGENT_HOST = "127.0.0.1";
-  env.USAGENT_PORT = "8787";
-
-  scripts.start.exec = "go run ./cmd/usagent serve --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
-  scripts.dev.exec = "go run ./cmd/usagent serve --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
+  scripts.start.exec = "go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787";
+  scripts.dev.exec = "go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787";
   scripts.check.exec = "go test ./...";
-  scripts.usage.exec = "go run ./cmd/usagent usage --config \"$USAGENT_CONFIG\" --host \"$USAGENT_HOST\" --port \"$USAGENT_PORT\"";
+  scripts.usage.exec = "go run ./cmd/usagent usage --config config.example.yaml --host 127.0.0.1 --port 8787";
 
   enterTest = ''
     go test ./...
