@@ -3,8 +3,6 @@ server:
   port: 8787
   readAuth:
     mode: "none"
-  ingestAuth:
-    mode: "none"
   statePath: "%STATE%/usagent/snapshot.json"
 
 providers:
@@ -29,8 +27,7 @@ quota:
   providers:
     - id: "claude-code"
       label: "Claude"
-      source: "push"
-      staleMs: 600000
+      source: "pull"      staleMs: 600000
       highlightedBucket: "fable"
       highlightedBucketLabel: "Fable"
 

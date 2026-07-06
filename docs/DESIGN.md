@@ -2,13 +2,12 @@
 
 ## Goal
 
-Extract agent usage/quota tracking from the Noctalia/pi-session-monitor integration into a standalone microservice that can run via Docker or Nix. The service fetches or ingests provider usage on a schedule and exposes normalized usage as JSON for any client.
+Extract agent usage/quota tracking from the Noctalia/pi-session-monitor integration into a standalone microservice that can run via Docker or Nix. The service fetches provider usage on a schedule and exposes normalized usage as JSON for any client.
 
 ## Architecture
 
 ```text
 Claude Code OAuth usage API ──poll────────────────────────────┐
-Claude Code statusLine ──optional push────────────────────────┤
 OpenAI Admin API ──poll───────────────────────────────────────┤
 z.ai quota endpoint ──poll────────────────────────────────────┤
                                                                ▼
@@ -39,9 +38,9 @@ The verified response includes `limits[]` entries for:
 - `kind: "weekly_all"` → current week, all models.
 - `kind: "weekly_scoped"` with `scope.model.display_name: "Fable"` → current week, Fable.
 
-The statusline ingest endpoint remains optional compatibility plumbing, but Claude quota tracking must prefer the OAuth usage API when it is available. Do not fabricate missing buckets.
+There is no POST source path. Do not fabricate missing buckets.
 
-OAuth usage responses are cached in memory and persisted to `server.statePath`. `/v1/usage` must not call the Anthropic endpoint on every widget poll. If a refresh is rate-limited or otherwise fails after a successful fetch, `usagent` serves the last cached OAuth quota items instead of falling back to stale statusline data and hiding Fable.
+OAuth usage responses are cached in memory and persisted to `server.statePath`. `/v1/usage` must not call the Anthropic endpoint on every widget poll. If a refresh is rate-limited or otherwise fails after a successful fetch, `usagent` serves the last cached OAuth quota items.
 
 ### OpenAI
 
@@ -72,7 +71,7 @@ Normalize token/session/weekly windows. Exclude web-search/TIME_LIMIT from the b
       "id": "claude-code",
       "label": "Claude",
       "state": "fresh",
-      "source": "push",
+      "source": "pull",
       "lastUpdatedAt": 1783286900000
     }
   ],
@@ -155,12 +154,10 @@ Secrets should use agenix/sops-nix/runtime files, never Nix store text.
 2. Run `usagent` side-by-side with pi-meta watcher.
 3. Noctalia usage widget reads `GET /v1/usage` instead of local `overview.json` quota fields.
 4. Remove quota polling from pi-session-monitor; keep session tracking there.
-5. Replace Claude statusline wrapper with `usagent-claude-statusline`.
 
 ## Open questions
 
-1. Does Claude statusline expose Fable weekly buckets? Capture a real payload.
-2. Is Claude monthly expected to mean Anthropic API monthly spend, or should it be hidden?
-3. Exact OpenAI budget limits and windows.
-4. Exact z.ai session/weekly/monthly semantics; web-search excluded.
-5. Whether Noctalia should use polling or SSE.
+1. Is Claude monthly expected to mean Anthropic API monthly spend, or should it be hidden?
+2. Exact OpenAI budget limits and windows.
+3. Exact z.ai session/weekly/monthly semantics; web-search excluded.
+4. Whether Noctalia should use polling or SSE.

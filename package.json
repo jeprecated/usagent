@@ -4,13 +4,12 @@
   "private": true,
   "type": "module",
   "bin": {
-    "usagent": "src/bin/usagent.mjs",
-    "usagent-claude-statusline": "src/bin/usagent-claude-statusline.mjs"
+    "usagent": "src/bin/usagent.mjs"
   },
   "scripts": {
     "start": "node src/bin/usagent.mjs",
     "dev": "USAGENT_CONFIG=config.example.yaml node --watch src/bin/usagent.mjs",
-    "check": "node --check src/bin/usagent.mjs && node --check src/bin/usagent-claude-statusline.mjs",
+    "check": "node --check src/bin/usagent.mjs",
     "test": "npm run check"
   },
   "engines": {

@@ -2,7 +2,7 @@
 
 Standalone agent usage/quota microservice.
 
-`usagent` polls or ingests provider usage for Claude Code/Fable, OpenAI, and z.ai, normalizes it to a stable JSON model, and exposes it over HTTP for Noctalia or any other client.
+`usagent` polls provider usage for Claude Code/Fable, OpenAI, and z.ai, normalizes it to a stable JSON model, and exposes it over HTTP for Noctalia or any other client.
 
 ## Target bar UI
 
@@ -34,7 +34,6 @@ start
 - `GET /readyz`
 - `GET /v1/usage`
 - `GET /v1/providers`
-- `POST /v1/ingest/claude-code`
 
 ## Config
 

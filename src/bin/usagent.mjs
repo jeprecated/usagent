@@ -10,7 +10,6 @@ const port = Number(process.env.USAGENT_PORT ?? 8787);
 const host = process.env.USAGENT_HOST ?? "127.0.0.1";
 
 const startedAt = Date.now();
-let lastClaudeIngest;
 let configCache;
 let configCacheLoadedAt = 0;
 let claudeOAuthCache = { items: [], nextRefreshAt: 0, staleAt: 0, lastUpdatedAt: 0 };
@@ -102,13 +101,13 @@ function parseResetAt(value) {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-function retryAfterMs(response, fallbackMs) {
+function retryAfterMs(response, defaultMs) {
   const header = response.headers.get("retry-after");
-  if (!header) return fallbackMs;
+  if (!header) return defaultMs;
   const seconds = Number(header);
   if (Number.isFinite(seconds)) return Math.max(1000, seconds * 1000);
   const dateMs = Date.parse(header);
-  return Number.isFinite(dateMs) ? Math.max(1000, dateMs - Date.now()) : fallbackMs;
+  return Number.isFinite(dateMs) ? Math.max(1000, dateMs - Date.now()) : defaultMs;
 }
 
 function cachedClaudeOAuthItems(now) {
@@ -251,33 +250,18 @@ async function claudeOAuthQuotaItems(config, generatedAt) {
   return cachedClaudeOAuthItems(generatedAt);
 }
 
-async function legacyQuotaItems(config) {
-  const path = config?.legacySources?.piSessionMonitorOverviewFile;
-  if (!path) return [];
-  const overview = await loadJson(path);
-  return Array.isArray(overview?.quotaItems) ? overview.quotaItems : [];
-}
-
 async function usageOverview() {
   const generatedAt = Date.now();
   const config = await loadConfig();
-  const legacyItems = await legacyQuotaItems(config);
-  const claudeOAuthItems = await claudeOAuthQuotaItems(config, generatedAt).catch(() => []);
-  const quotaItems = claudeOAuthItems.length > 0
-    ? [...legacyItems.filter((item) => item.provider !== "claude-code"), ...claudeOAuthItems]
-    : legacyItems;
+  const quotaItems = await claudeOAuthQuotaItems(config, generatedAt).catch(() => []);
   const providerIds = config?.usageView?.providers ?? ["claude-code", "openai", "z-ai"];
   const providers = providerIds.map((id) => ({
     id,
     label: providerLabel(id),
     state: providerState(id, quotaItems),
-    source: id === "claude-code" && claudeOAuthItems.length === 0 ? "push" : "pull",
+    source: "pull",
     lastUpdatedAt: quotaItems.filter((item) => item.provider === id).map((item) => item.refresh?.lastUpdatedAt).filter(Number.isFinite).sort((a, b) => b - a)[0],
   }));
-
-  if (lastClaudeIngest && !quotaItems.some((item) => item.provider === "claude-code")) {
-    providers.unshift({ id: "claude-code", label: "Claude", state: "fresh", source: "push", lastUpdatedAt: lastClaudeIngest.receivedAt });
-  }
 
   return {
     schemaVersion: 2,
@@ -290,17 +274,6 @@ async function usageOverview() {
   };
 }
 
-async function readBody(req, limit = 1024 * 1024) {
-  let size = 0;
-  const chunks = [];
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > limit) throw new Error("request_too_large");
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -311,11 +284,6 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/config/raw") {
       const text = await readFile(configPath, "utf8").catch(() => "");
       return json(res, text ? 200 : 404, { configPath, text });
-    }
-    if (req.method === "POST" && url.pathname === "/v1/ingest/claude-code") {
-      const body = await readBody(req);
-      lastClaudeIngest = { receivedAt: Date.now(), bytes: Buffer.byteLength(body) };
-      return json(res, 202, { accepted: true, provider: "claude-code", receivedAt: lastClaudeIngest.receivedAt });
     }
     return notFound(res);
   } catch (error) {

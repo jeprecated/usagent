@@ -21,8 +21,6 @@
             cp -R package.json src config.example.yaml $out/lib/usagent/
             makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/usagent \
               --add-flags $out/lib/usagent/src/bin/usagent.mjs
-            makeWrapper ${pkgs.nodejs_24}/bin/node $out/bin/usagent-claude-statusline \
-              --add-flags $out/lib/usagent/src/bin/usagent-claude-statusline.mjs
             runHook postInstall
           '';
           nativeBuildInputs = [ pkgs.makeWrapper ];
