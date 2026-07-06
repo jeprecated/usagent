@@ -8,8 +8,9 @@
 
 ```text
 Claude Code OAuth usage API ──refresh loop───────────────┐
-OpenAI placeholder provider ──refresh loop───────────────┤
-z.ai placeholder provider ───refresh loop────────────────┤
+OpenAI Admin Costs API ────refresh loop──────────────────┤
+z.ai quota API ────────────refresh loop──────────────────┤
+Custom HTTP JSON APIs ─────refresh loop──────────────────┤
                                                           ▼
                                          in-memory snapshot cache
                                                           │
@@ -28,7 +29,10 @@ Package layout:
 - `internal/cache` owns current provider snapshots, stale/error metadata, and atomic disk persistence.
 - `internal/providers` defines the provider interface.
 - `internal/providers/claude` implements Claude Code OAuth fetching and normalization.
-- `internal/providers/noop` keeps OpenAI and z.ai metadata stable until their real fetchers are added.
+- `internal/providers/openai` implements OpenAI Admin Costs API fetching and budget normalization.
+- `internal/providers/zai` implements z.ai quota fetching and normalization.
+- `internal/providers/custom` implements deterministic HTTP JSON mapping for user-defined providers.
+- `internal/providers/noop` keeps disabled provider metadata stable when requested by `usageView.providers`.
 - `internal/httpapi` exposes the stable HTTP contract.
 
 ## Provider sources
@@ -53,9 +57,31 @@ Missing buckets are not fabricated. The OAuth access token is read from the conf
 
 If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 
-### OpenAI and z.ai
+### OpenAI
 
-OpenAI and z.ai are currently placeholder providers that return no quota items while preserving provider metadata in `/v1/usage` and `/v1/providers`.
+OpenAI is polled from the Admin Costs API when `providers.openai.enabled=true`:
+
+```text
+GET https://api.openai.com/v1/organization/costs?start_time=<unix>&end_time=<unix>&bucket_width=1d
+Authorization: Bearer <runtime OPENAI_ADMIN_KEY>
+```
+
+Each configured budget produces one quota item. The provider requests the matching weekly/monthly window, follows `next_page` pagination with a hard page limit, sums `amount.value` buckets matching the budget currency, and reports `used`, `remaining`, and `percentUsed` against the configured budget limit. Non-2xx responses honor `Retry-After` and are handled by stale-if-error cache behavior.
+
+### z.ai
+
+z.ai is polled when `providers.zAi.enabled=true`:
+
+```text
+GET https://api.z.ai/api/monitor/usage/quota/limit
+Authorization: Bearer <runtime ZAI_API_KEY or GLM_API_KEY>
+```
+
+`data.limits[]` entries are normalized into quota items for token, session, rate, and count limits. `nextResetTime` is propagated to `window.resetAt`/`reset`. `percentage` is used directly when present; otherwise percent is computed from used and remaining values. `TIME_LIMIT`/web-search limits are excluded by default and may be changed in config. Unknown limit types are ignored only if excluded; otherwise they are exposed with stable IDs and custom windows.
+
+### Custom HTTP JSON providers
+
+`providers.custom[]` lets users map arbitrary JSON endpoints into quota items. Each endpoint can add static headers and runtime env-var auth (`none`, `bearer`, or raw `header`). `itemsPath` selects an array; omitting it maps the whole response as one item. Mapping string values are JSON dot paths by default, while `literal:<value>` forces a constant. Reset times support `unixMs`, `unixSeconds`, and `rfc3339`. Secrets are never read from generated config values; token values come from env vars.
 
 ## Cache and refresh behavior
 

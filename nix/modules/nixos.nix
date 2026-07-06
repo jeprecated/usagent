@@ -57,13 +57,30 @@ in
           endpointUrl = "https://api.anthropic.com/api/oauth/usage";
           betaHeader = "oauth-2025-04-20";
         };
+        providers.openai = {
+          enabled = false;
+          apiKeyEnv = "OPENAI_ADMIN_KEY";
+          baseUrl = "https://api.openai.com";
+          budgets = [];
+        };
+        providers.zAi = {
+          enabled = false;
+          endpointUrl = "https://api.z.ai/api/monitor/usage/quota/limit";
+          tokenEnv = "ZAI_API_KEY";
+          tokenEnvFallbacks = [ "GLM_API_KEY" ];
+          authScheme = "bearer";
+          authHeader = "Authorization";
+          excludeLimitTypes = [ "TIME_LIMIT" ];
+        };
+        providers.custom = [];
         usageView.providers = [ "claude-code" "openai" "z-ai" ];
         quota.refreshMs = 300000;
       };
       description = ''
         YAML configuration rendered for usagent. Do not put plaintext tokens here:
         Nix store-generated config is world-readable. Use runtime credential paths,
-        systemd credentials, agenix, sops-nix, or environment files for secrets.
+        token env var names (for example OPENAI_ADMIN_KEY/ZAI_API_KEY), systemd
+        credentials, agenix, sops-nix, or environment files for secrets.
       '';
     };
 

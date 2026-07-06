@@ -14,6 +14,72 @@ providers:
     refreshMs: 300000
     staleMs: 900000
 
+  openai:
+    # Set enabled true only when OPENAI_ADMIN_KEY is available at runtime.
+    enabled: false
+    baseUrl: "https://api.openai.com"
+    # costsEndpoint can override baseUrl + /v1/organization/costs for local fakes/proxies.
+    # costsEndpoint: "https://api.openai.com/v1/organization/costs"
+    apiKeyEnv: "OPENAI_ADMIN_KEY"
+    refreshMs: 600000
+    staleMs: 1800000
+    budgets:
+      - id: "weekly-usd"
+        unit: "usd"
+        limit: 50
+        window: { id: "week", label: "W", kind: "weekly" }
+      - id: "monthly-usd"
+        unit: "usd"
+        limit: 200
+        window: { id: "month", label: "M", kind: "monthly" }
+
+  zAi:
+    # Set enabled true only when ZAI_API_KEY or GLM_API_KEY is available at runtime.
+    enabled: false
+    endpointUrl: "https://api.z.ai/api/monitor/usage/quota/limit"
+    tokenEnv: "ZAI_API_KEY"
+    tokenEnvFallbacks: ["GLM_API_KEY"]
+    authScheme: "bearer" # bearer | header | none
+    authHeader: "Authorization"
+    refreshMs: 300000
+    staleMs: 900000
+    # TIME_LIMIT/web-search quota is hidden by default.
+    excludeLimitTypes: ["TIME_LIMIT"]
+
+  custom:
+    - id: "my-provider"
+      label: "Mine"
+      enabled: false
+      refreshMs: 300000
+      staleMs: 900000
+      endpoints:
+        - id: "quota"
+          url: "https://example.com/quota"
+          method: "GET"
+          headers:
+            x-client: "usagent"
+          auth:
+            type: "bearer" # none | bearer | header
+            tokenEnv: "MINE_TOKEN"
+            headerName: "Authorization"
+          itemsPath: "items"
+          item:
+            # String values are JSON dot paths by default. Use literal:<value> for constants.
+            id: "id"
+            label: "label"
+            window:
+              id: "window.id"
+              label: "window.label"
+              kind: "window.kind"
+              resetAt: "resetAt"
+              resetAtFormat: "unixMs" # unixMs | unixSeconds | rfc3339
+            unit: "unit"
+            limit: "limit"
+            used: "used"
+            remaining: "remaining"
+            percentUsed: "percentUsed"
+            visible: true
+
 usageView:
   providers: ["claude-code", "openai", "z-ai"]
   windows: ["session", "weekly", "monthly", "fableWeekly"]
@@ -33,25 +99,3 @@ quota:
       staleMs: 600000
       highlightedBucket: "fable"
       highlightedBucketLabel: "Fable"
-
-    - id: "openai"
-      label: "OpenAI"
-      source: "pull"
-      apiKeyEnv: "OPENAI_ADMIN_KEY"
-      refreshMs: 600000
-      budgets:
-        - id: "weekly-usd"
-          unit: "usd"
-          limit: 50
-          window: { id: "week", kind: "weekly" }
-        - id: "monthly-usd"
-          unit: "usd"
-          limit: 200
-          window: { id: "month", kind: "monthly" }
-
-    - id: "z-ai"
-      label: "z.ai"
-      source: "pull"
-      endpointUrl: "https://api.z.ai/api/monitor/usage/quota/limit"
-      tokenEnv: "ZAI_API_KEY"
-      refreshMs: 300000

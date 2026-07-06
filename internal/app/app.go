@@ -11,7 +11,10 @@ import (
 	"github.com/jmalloc/usagent/internal/model"
 	"github.com/jmalloc/usagent/internal/providers"
 	"github.com/jmalloc/usagent/internal/providers/claude"
+	"github.com/jmalloc/usagent/internal/providers/custom"
 	"github.com/jmalloc/usagent/internal/providers/noop"
+	"github.com/jmalloc/usagent/internal/providers/openai"
+	"github.com/jmalloc/usagent/internal/providers/zai"
 )
 
 type ProviderTiming struct{ RefreshMs, StaleMs int64 }
@@ -33,16 +36,47 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 	}
 	ps := []providers.Provider{}
 	timings := map[string]ProviderTiming{}
+	labels := labelsFor(cfg)
+	active := map[string]bool{}
 	if cfg.Providers.ClaudeOAuth.Enabled {
 		p := claude.New(cfg.Providers.ClaudeOAuth)
 		ps = append(ps, p)
 		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.ClaudeOAuth.RefreshMs, StaleMs: cfg.Providers.ClaudeOAuth.StaleMs}
+		active[p.ID()] = true
 	}
-	for _, id := range cfg.UsageView.Providers {
-		if id == "claude-code" && cfg.Providers.ClaudeOAuth.Enabled {
+	if cfg.Providers.OpenAI.Enabled {
+		p := openai.New(cfg.Providers.OpenAI)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.OpenAI.RefreshMs, StaleMs: cfg.Providers.OpenAI.StaleMs}
+		active[p.ID()] = true
+	}
+	if cfg.Providers.ZAI.Enabled {
+		p := zai.New(cfg.Providers.ZAI)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.ZAI.RefreshMs, StaleMs: cfg.Providers.ZAI.StaleMs}
+		active[p.ID()] = true
+	}
+	for _, cp := range cfg.Providers.Custom {
+		if !cp.Enabled {
 			continue
 		}
-		label := LabelFor(id)
+		p := custom.New(cp)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cp.RefreshMs, StaleMs: cp.StaleMs}
+		active[p.ID()] = true
+		labels[p.ID()] = p.Label()
+		if !contains(cfg.UsageView.Providers, p.ID()) {
+			cfg.UsageView.Providers = append(cfg.UsageView.Providers, p.ID())
+		}
+	}
+	for _, id := range cfg.UsageView.Providers {
+		if active[id] {
+			continue
+		}
+		label := labels[id]
+		if label == "" {
+			label = LabelFor(id)
+		}
 		ps = append(ps, noop.New(id, label))
 		timings[id] = ProviderTiming{RefreshMs: cfg.Quota.RefreshMs, StaleMs: max(cfg.Quota.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))}
 	}
@@ -62,12 +96,36 @@ func LabelFor(id string) string {
 	}
 }
 
+func labelsFor(cfg config.Config) map[string]string {
+	labels := map[string]string{"claude-code": "Claude", "openai": "OpenAI", "z-ai": "z.ai"}
+	for _, cp := range cfg.Providers.Custom {
+		if cp.Label != "" {
+			labels[cp.ID] = cp.Label
+		}
+	}
+	return labels
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) LoadState() error { return a.Store.Load() }
 
 func (a *App) ProviderModels() []model.Provider {
+	labels := labelsFor(a.Cfg)
 	out := make([]model.Provider, 0, len(a.Cfg.UsageView.Providers))
 	for _, id := range a.Cfg.UsageView.Providers {
-		out = append(out, model.Provider{ID: id, Label: LabelFor(id), Source: "pull"})
+		label := labels[id]
+		if label == "" {
+			label = LabelFor(id)
+		}
+		out = append(out, model.Provider{ID: id, Label: label, Source: "pull"})
 	}
 	return out
 }

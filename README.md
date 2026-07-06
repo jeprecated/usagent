@@ -38,6 +38,62 @@ Secrets must be provided by runtime environment variables or secret files. Do no
 
 Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses.
 
+OpenAI usage is fetched from the Admin Costs API when `providers.openai.enabled=true`. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
+
+```yaml
+providers:
+  openai:
+    enabled: true
+    apiKeyEnv: "OPENAI_ADMIN_KEY"
+    budgets:
+      - id: "weekly-usd"
+        unit: "usd"
+        limit: 50
+        window: { id: "week", label: "W", kind: "weekly" }
+      - id: "monthly-usd"
+        unit: "usd"
+        limit: 200
+        window: { id: "month", label: "M", kind: "monthly" }
+```
+
+z.ai usage is fetched from `GET https://api.z.ai/api/monitor/usage/quota/limit` when `providers.zAi.enabled=true`. Provide `ZAI_API_KEY` (fallback `GLM_API_KEY`) or override auth/header settings for compatible endpoints:
+
+```yaml
+providers:
+  zAi:
+    enabled: true
+    tokenEnv: "ZAI_API_KEY"
+    tokenEnvFallbacks: ["GLM_API_KEY"]
+    excludeLimitTypes: ["TIME_LIMIT"] # hides web-search/TIME_LIMIT by default
+```
+
+Custom HTTP JSON providers can map local/proxy quota APIs into usagent quota items. Mapping strings are JSON dot paths by default; use `literal:<value>` for constants. Token values are read from env vars only:
+
+```yaml
+providers:
+  custom:
+    - id: "my-provider"
+      label: "Mine"
+      enabled: true
+      endpoints:
+        - id: "quota"
+          url: "https://example.com/quota"
+          auth: { type: "bearer", tokenEnv: "MINE_TOKEN" }
+          itemsPath: "items"
+          item:
+            id: "id"
+            label: "literal:Mine quota"
+            window: { id: "window.id", label: "window.label", kind: "window.kind", resetAt: "resetAt", resetAtFormat: "unixMs" }
+            unit: "unit"
+            limit: "limit"
+            used: "used"
+            remaining: "remaining"
+            percentUsed: "percentUsed"
+            visible: true
+usageView:
+  providers: ["claude-code", "openai", "z-ai", "my-provider"]
+```
+
 ## Docker
 
 ```sh
@@ -114,4 +170,4 @@ The generated YAML lives in the Nix store and must not contain plaintext secrets
 Usage: Claude S:100% W:50% F:24% [2h14m] · OpenAI W:50% M:70% · z.ai S:90% W:97%
 ```
 
-OpenAI and z.ai are currently stable metadata placeholders with no quota items until their provider fetchers are implemented.
+OpenAI, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.
