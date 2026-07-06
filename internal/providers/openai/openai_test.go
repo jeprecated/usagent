@@ -20,12 +20,18 @@ func TestOpenAICostNormalizationWeeklyMonthlyMultiBucketAndPagination(t *testing
 		if got := r.Header.Get("Authorization"); got != "Bearer test-admin-key" {
 			t.Fatalf("Authorization=%q", got)
 		}
-		if r.URL.Query().Get("bucket_width") != "1d" || r.URL.Query().Get("start_time") == "" || r.URL.Query().Get("end_time") == "" {
+		if r.URL.Query().Get("bucket_width") != "1d" || r.URL.Query().Get("start_time") == "" || r.URL.Query().Get("end_time") == "" || r.URL.Query().Get("limit") == "" {
 			t.Fatalf("query=%s", r.URL.RawQuery)
 		}
-		if r.URL.Query().Get("after") == "" {
+		if r.URL.Query().Get("after") != "" {
+			t.Fatalf("unexpected after cursor: query=%s", r.URL.RawQuery)
+		}
+		if r.URL.Query().Get("page") == "" {
 			fmt.Fprint(w, `{"data":[{"start_time":1699913600,"end_time":1700000000,"results":[{"amount":{"value":2.25,"currency":"usd"}},{"amount":{"value":1.25,"currency":"usd"}}]}],"next_page":"p2"}`)
 			return
+		}
+		if r.URL.Query().Get("page") != "p2" {
+			t.Fatalf("page cursor=%q", r.URL.Query().Get("page"))
 		}
 		fmt.Fprint(w, `{"data":[{"start_time":1697408000,"end_time":1697494400,"results":[{"amount":{"value":3.50,"currency":"usd"}}]}]}`)
 	}))

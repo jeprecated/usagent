@@ -96,6 +96,7 @@ func (p *Provider) fetchCosts(ctx context.Context, now time.Time, apiKey string,
 		q.Set("start_time", fmt.Sprintf("%d", start.Unix()))
 		q.Set("end_time", fmt.Sprintf("%d", end.Unix()))
 		q.Set("bucket_width", "1d")
+		q.Set("limit", fmt.Sprintf("%d", costsLimit(start, end)))
 		for _, v := range p.cfg.ProjectIDs {
 			q.Add("project_ids[]", v)
 		}
@@ -106,7 +107,7 @@ func (p *Provider) fetchCosts(ctx context.Context, now time.Time, apiKey string,
 			q.Add("group_by[]", v)
 		}
 		if page != "" {
-			q.Set("after", page)
+			q.Set("page", page)
 		}
 		u.RawQuery = q.Encode()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -144,6 +145,17 @@ func (p *Provider) fetchCosts(ctx context.Context, now time.Time, apiKey string,
 		page = payload.NextPage
 	}
 	return buckets, 0, fmt.Errorf("openai costs exceeded pagination limit %d", maxPages)
+}
+
+func costsLimit(start, end time.Time) int {
+	days := int(end.Sub(start).Hours()/24) + 1
+	if days < 1 {
+		return 1
+	}
+	if days > 180 {
+		return 180
+	}
+	return days
 }
 
 func (p *Provider) costsEndpoint() string {
