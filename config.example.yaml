@@ -82,7 +82,7 @@ providers:
 
 usageView:
   providers: ["claude-code", "openai", "z-ai"]
-  windows: ["session", "weekly", "monthly", "fableWeekly"]
+  windows: ["session", "weekly", "monthly", "fableWeekly", "extraCredits"]
   percentMode: "remaining" # remaining | used
   labelStyle: "long" # long | short
   showResetMinutes: true

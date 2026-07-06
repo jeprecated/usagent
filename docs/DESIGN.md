@@ -47,13 +47,14 @@ Authorization: Bearer <runtime credentials claudeAiOauth.accessToken>
 anthropic-beta: oauth-2025-04-20
 ```
 
-The response `limits[]` entries are normalized as follows:
+The response is normalized as follows:
 
-- `kind: "session"` → current 5h/session bucket.
-- `kind: "weekly_all"` → current week, all models.
-- `kind: "weekly_scoped"` with model display/id containing `Fable` → current week, Fable.
+- `limits[]` entry with `kind: "session"` → current 5h/session bucket.
+- `limits[]` entry with `kind: "weekly_all"` → current week, all models.
+- `limits[]` entry with `kind: "weekly_scoped"` and model display/id containing `Fable` → current week, Fable.
+- `extra_usage` with `is_enabled: true` and `monthly_limit` → Extra Credits monthly balance. The endpoint reports `monthly_limit` and `used_credits` in cents, so usagent converts them to the reported currency unit and computes `remaining = (monthly_limit - used_credits) / 100`.
 
-Missing buckets are not fabricated. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses.
+Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks are skipped because they do not expose a finite remaining balance. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses.
 
 If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 

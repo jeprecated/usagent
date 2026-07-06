@@ -49,7 +49,7 @@ See `config.example.yaml`. It is real YAML. Paths beginning with `~` are expande
 
 Secrets must be provided by runtime environment variables or secret files. Do not put tokens in config, Docker images, Nix store paths, or checked-in files.
 
-Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses.
+Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses. When the endpoint includes `extra_usage`, usagent exposes enabled Extra Credits as a monthly currency quota item, converting the API's cent values to dollars/euros/etc.
 
 OpenAI usage is fetched from the Admin Costs API when `providers.openai.enabled=true`. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
 

@@ -40,9 +40,10 @@ type credentials struct {
 	} `json:"claudeAiOauth"`
 }
 type usagePayload struct {
-	Limits   []limit `json:"limits"`
-	FiveHour *limit  `json:"five_hour"`
-	SevenDay *limit  `json:"seven_day"`
+	Limits     []limit     `json:"limits"`
+	FiveHour   *limit      `json:"five_hour"`
+	SevenDay   *limit      `json:"seven_day"`
+	ExtraUsage *extraUsage `json:"extra_usage"`
 }
 type limit struct {
 	Kind        string   `json:"kind"`
@@ -56,6 +57,15 @@ type limit struct {
 			ID          string `json:"id"`
 		} `json:"model"`
 	} `json:"scope"`
+}
+
+type extraUsage struct {
+	IsEnabled      bool     `json:"is_enabled"`
+	MonthlyLimit   *float64 `json:"monthly_limit"`
+	UsedCredits    *float64 `json:"used_credits"`
+	Utilization    *float64 `json:"utilization"`
+	Currency       string   `json:"currency"`
+	DisabledReason string   `json:"disabled_reason"`
 }
 
 func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, error) {
@@ -117,6 +127,11 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 	if fable := findLimit(payload, "weekly_scoped", true); fable != nil {
 		items = append(items, quotaItem("claude-code-oauth-fable-weekly", "Claude Fable weekly", "fableWeekly", "F", "weekly", *fable, now, refreshMs, staleMs))
 	}
+	if extra := payload.ExtraUsage; extra != nil {
+		if item, ok := extraUsageItem(*extra, now, refreshMs, staleMs); ok {
+			items = append(items, item)
+		}
+	}
 	return items
 }
 
@@ -157,6 +172,40 @@ func quotaItem(id, label, windowID, windowLabel, windowKind string, l limit, now
 	return item
 }
 
+func extraUsageItem(extra extraUsage, now time.Time, refreshMs, staleMs int64) (model.QuotaItem, bool) {
+	if !extra.IsEnabled || extra.MonthlyLimit == nil || *extra.MonthlyLimit <= 0 {
+		return model.QuotaItem{}, false
+	}
+	limit := *extra.MonthlyLimit / 100
+	used := 0.0
+	if extra.UsedCredits != nil {
+		used = math.Max(0, *extra.UsedCredits/100)
+	}
+	remaining := math.Max(0, limit-used)
+	percentUsed := 0.0
+	if extra.Utilization != nil {
+		percentUsed = clampPercent(*extra.Utilization)
+	} else if limit > 0 {
+		percentUsed = clampPercent(used / limit * 100)
+	}
+	nowMs := now.UnixMilli()
+	return model.QuotaItem{
+		ID:          "claude-code-oauth-extra-credits",
+		Provider:    "claude-code",
+		Label:       "Claude extra credits",
+		Window:      model.Window{ID: "extraCredits", Label: "Extra", Kind: "monthly"},
+		Unit:        currencyUnit(extra.Currency),
+		Limit:       round2(limit),
+		Used:        round2(used),
+		Remaining:   round2(remaining),
+		PercentUsed: percentUsed,
+		State:       "fresh",
+		Severity:    severityForPercent(percentUsed),
+		Visible:     true,
+		Refresh:     &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs},
+	}, true
+}
+
 func percent(l limit) float64 {
 	if l.Percent != nil {
 		return *l.Percent
@@ -174,6 +223,23 @@ func clampPercent(v float64) float64 {
 		return 100
 	}
 	return math.Round(v)
+}
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+func currencyUnit(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return "credits"
+	}
+	return v
+}
+func severityForPercent(v float64) string {
+	if v >= 100 {
+		return "critical"
+	}
+	if v >= 80 {
+		return "warning"
+	}
+	return "ok"
 }
 func normalizeSeverity(v string) string {
 	switch v {
