@@ -12,6 +12,7 @@ check                 # go test ./...
 start                 # go run ./cmd/usagent serve --config config.example.yaml
 usage                 # go run ./cmd/usagent usage --config config.example.yaml
 expiring              # go run ./cmd/usagent expiring-usage --config config.example.yaml --within 24h
+mcp                   # go run ./cmd/usagent mcp --config config.example.yaml
 ```
 
 Without devenv:
@@ -21,6 +22,7 @@ go test ./...
 go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787
 go run ./cmd/usagent usage --config config.example.yaml
 go run ./cmd/usagent expiring-usage --config config.example.yaml --within 24h
+go run ./cmd/usagent mcp --config config.example.yaml
 ```
 
 ## CLI usage summary
@@ -38,8 +40,20 @@ usagent usage --offline  # skip daemon lookup and refresh/read locally
 
 ```sh
 usagent expiring --within 24h --minimum-remaining-percent 10
-usagent expiring-usage --providers chatgpt,claude-code --include-low-confidence
-usagent expiring-usage --json
+usagent expiring-usage --providers chatgpt,claude-code --tiers high,extra-high --tags chat,codex
+usagent expiring-usage --include-low-confidence --json
+```
+
+`usagent mcp` starts a stdio MCP server for coding agents. It exposes tools for current usage (`usage`) and likely expiring quota/tokens to burn (`tokens_to_burn`). Tool calls prefer the running usagent daemon and fall back to the same local refresh/read path as the CLI when the daemon is unavailable.
+
+```sh
+usagent mcp --config ~/.config/usagent/config.yaml
+```
+
+Example MCP client entry:
+
+```json
+{"mcpServers":{"usagent":{"command":"usagent","args":["mcp","--config","~/.config/usagent/config.yaml"]}}}
 ```
 
 ## Endpoints
@@ -49,11 +63,14 @@ usagent expiring-usage --json
 - `GET /v1/usage`
 - `GET /v1/usage/analysis`
 - `GET /v1/expiring-usage`
+- `GET /v1/recommendations/provider`
+- `GET /v1/resets`
+- `GET /v1/availability`
 - `GET /v1/providers`
 - `GET /v1/chatgpt/reset-credits`
 - `POST /v1/chatgpt/reset-credits/consume`
 
-`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. `GET /v1/usage/analysis` is cached-only: it derives per-item percent remaining, reset/window timing, inferred pace, pressure, projected exhaustion, confidence, and caveats from the current `/v1/usage` snapshot without refreshing providers. `GET /v1/expiring-usage` is also cached-only: it derives likely "use it or lose it" quota opportunities from the current `/v1/usage` snapshot and supports `within`/`withinMs`, `minimumRemainingPercent`, `providers`, and `includeLowConfidence` query filters. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling, and [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for ChatGPT/Codex reset banking details.
+`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. `GET /v1/usage/analysis` is cached-only: it derives per-item percent remaining, reset/window timing, inferred pace, pressure, projected exhaustion, confidence, and caveats from the current `/v1/usage` snapshot without refreshing providers. `GET /v1/expiring-usage` is also cached-only: it derives likely "use it or lose it" quota opportunities from the current `/v1/usage` snapshot and supports `within`/`withinMs`, `minimumRemainingPercent`, `providers`, `tiers`/`tier`, `tags`/`tag`, and `includeLowConfidence` query filters. Tier filters match provider or model tiers; tag filters use any matching provider/model tag. `GET /v1/recommendations/provider` supports the same cached-only `providers`, `tiers`/`tier`, `tags`/`tag`, `minimumRemainingPercent`, and `unit` filters. Expiring-usage responses separate raw reset-bound unused quota from actionable waste: `rawEstimatedWastedAmount`/`rawEstimatedWastedPercent` show the simple amount likely to reset unused, while `actionableWasteAmount`/`actionableWastePercent` are adjusted by history and overlapping parent windows. The legacy `estimatedWastedAmount` fields remain as raw estimated unused quota for compatibility, but opportunity scoring and CLI wording use actionable waste when available. For example, a 5h ChatGPT bucket may show 75% raw expiring unused, but only 18.75% actionable waste when a fresh weekly/monthly parent has enough future 5h resets to satisfy forecast demand. `GET /v1/resets` returns a reset calendar sorted by reset time, and `GET /v1/availability` returns conservative provider-level availability with blockers, constraints, and next likely improvement times. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling, and [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for ChatGPT/Codex reset banking details.
 
 ## Config
 

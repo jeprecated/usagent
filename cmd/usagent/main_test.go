@@ -40,8 +40,18 @@ func TestRootExpiringUsageDispatchAndHelp(t *testing.T) {
 	if err := runWithIO([]string{"expiring-usage", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "--include-low-confidence") || !strings.Contains(stdout.String(), "--within-ms") {
+	if !strings.Contains(stdout.String(), "--include-low-confidence") || !strings.Contains(stdout.String(), "--within-ms") || !strings.Contains(stdout.String(), "--tiers") || !strings.Contains(stdout.String(), "--tags") {
 		t.Fatalf("help=%s", stdout.String())
+	}
+}
+
+func TestMCPHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"mcp", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "usagent mcp") || !strings.Contains(stdout.String(), "--offline") {
+		t.Fatalf("help=%s stderr=%s", stdout.String(), stderr.String())
 	}
 }
 

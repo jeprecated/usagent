@@ -14,6 +14,8 @@
   scripts.dev.exec = "go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787";
   scripts.check.exec = "go test ./...";
   scripts.usage.exec = "go run ./cmd/usagent usage --config config.example.yaml --host 127.0.0.1 --port 8787";
+  scripts."expiring-usage".exec = "go run ./cmd/usagent expiring-usage --config config.example.yaml --host 127.0.0.1 --port 8787";
+  scripts.mcp.exec = "go run ./cmd/usagent mcp --config config.example.yaml --host 127.0.0.1 --port 8787";
 
   enterTest = ''
     go test ./...
