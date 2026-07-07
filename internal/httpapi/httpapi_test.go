@@ -25,7 +25,7 @@ func TestHTTPContract(t *testing.T) {
 	a := app.New(cfg, nil)
 	a.Store.UpsertSuccess("claude-code", "Claude", []model.QuotaItem{{ID: "claude-code-oauth-session", Provider: "claude-code", Label: "Claude 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling"}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, Visible: true}}, time.UnixMilli(1000), 1000, 2000)
 	h := New(a, "config.example.yaml")
-	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/usage/analysis", "/v1/expiring-usage", "/v1/recommendations/provider", "/v1/providers"} {
+	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/usage/analysis", "/v1/expiring-usage", "/v1/recommendations/provider", "/v1/resets", "/v1/availability", "/v1/providers"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -56,6 +56,8 @@ func TestHTTPContract(t *testing.T) {
 
 func TestExpiringUsageEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 	cfg := config.Default()
+	cfg.Providers.ChatGPT.Metadata = config.ProviderMetadataConfig{Tier: "high", Tags: []string{"chat", "subscription"}, Models: map[string]config.MetadataConfig{"chatgpt-primary": {Tier: "extra-high", Tags: []string{"codex"}}}}
+	cfg.Providers.ZAI.Metadata = config.ProviderMetadataConfig{Tier: "medium", Tags: []string{"api"}}
 	a := app.New(cfg, nil)
 	now := time.Now()
 	resetAt := now.Add(time.Hour).UnixMilli()
@@ -80,6 +82,21 @@ func TestExpiringUsageEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 	if len(res.Opportunities) != 1 || res.Opportunities[0].Provider != "chatgpt" || res.Opportunities[0].ItemID != "chatgpt-primary" {
 		t.Fatalf("unexpected opportunities: %+v", res.Opportunities)
 	}
+	if res.Opportunities[0].ProviderTier != "high" || res.Opportunities[0].ModelTier != "extra-high" || res.Opportunities[0].ModelTags[0] != "codex" {
+		t.Fatalf("missing metadata in expiring usage response: %+v", res.Opportunities[0])
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/expiring-usage?within=2h&tiers=medium&tags=api", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Opportunities) != 1 || res.Opportunities[0].Provider != "z-ai" || res.Opportunities[0].ProviderTier != "medium" {
+		t.Fatalf("unexpected tier/tag filtered opportunities: %+v", res.Opportunities)
+	}
 
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/expiring-usage?withinMs=1", nil))
@@ -102,6 +119,8 @@ func TestExpiringUsageEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 
 func TestProviderRecommendationsEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 	cfg := config.Default()
+	cfg.Providers.ChatGPT.Metadata = config.ProviderMetadataConfig{Tier: "high", Tags: []string{"chat", "subscription"}, Models: map[string]config.MetadataConfig{"chatgpt-secondary": {Tier: "extra-high", Tags: []string{"codex"}}}}
+	cfg.Providers.ClaudeOAuth.Metadata = config.ProviderMetadataConfig{Tier: "high", Tags: []string{"code"}, Models: map[string]config.MetadataConfig{"claude-code-oauth-session": {Tier: "high", Tags: []string{"fable"}}, "claude-code-oauth-weekly-all": {Tier: "high", Tags: []string{"fable"}}}}
 	a := app.New(cfg, nil)
 	now := time.Now()
 	chatReset := now.Add(4 * 24 * time.Hour).UnixMilli()
@@ -133,9 +152,79 @@ func TestProviderRecommendationsEndpointUsesCachedUsageAndQueryFilters(t *testin
 	}
 
 	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?tiers=extra-high&tags=codex", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tier/tag status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.RankedCandidates) != 1 || res.SelectedProvider != "chatgpt" {
+		t.Fatalf("unexpected tier/tag recommendation response: %+v", res)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?tier=high&tag=code&unit=percent", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("singular tier/tag status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.RankedCandidates) != 1 || res.SelectedProvider != "claude-code" {
+		t.Fatalf("unexpected singular tier/tag recommendation response: %+v", res)
+	}
+
+	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?task=bogus", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad task status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestResetsAndAvailabilityEndpointsUseCachedUsage(t *testing.T) {
+	cfg := config.Default()
+	a := app.New(cfg, nil)
+	provider := &countingProvider{id: "counted"}
+	a.Providers = []providers.Provider{provider}
+	a.Cfg.UsageView.Providers = []string{"counted"}
+	now := time.Now()
+	soon := now.Add(time.Hour).UnixMilli()
+	later := now.Add(2 * time.Hour).UnixMilli()
+	a.Store.UpsertSuccess("counted", "Counted", []model.QuotaItem{
+		{ID: "weekly", Provider: "counted", Label: "Weekly", Window: model.Window{ID: "weekly", Label: "W", Kind: "weekly", ResetAt: &later}, Unit: "percent", Limit: 100, Used: 95, Remaining: 5, PercentUsed: 95, State: "fresh", Severity: "ok", Visible: true, Reset: &model.Reset{ResetAt: later, ResetWindowID: "weekly", Source: "provider"}},
+		{ID: "session", Provider: "counted", Label: "Session", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &soon}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, State: "fresh", Severity: "ok", Visible: true, Reset: &model.Reset{ResetAt: soon, ResetWindowID: "session", Source: "provider"}},
+		{ID: "no-reset", Provider: "counted", Label: "No reset", Unit: "percent", Limit: 100, Used: 1, Remaining: 99, PercentUsed: 1, State: "fresh", Severity: "ok", Visible: true},
+	}, now, int64(time.Hour/time.Millisecond), int64((2*time.Hour)/time.Millisecond))
+	h := New(a, "config.example.yaml")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/resets", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resets status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resets analysis.ResetCalendarResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resets); err != nil {
+		t.Fatal(err)
+	}
+	if len(resets.Resets) != 2 || resets.Resets[0].ItemID != "session" || resets.Resets[1].ItemID != "weekly" {
+		t.Fatalf("resets=%+v", resets.Resets)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/availability", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("availability status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var availability analysis.AvailabilityResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &availability); err != nil {
+		t.Fatal(err)
+	}
+	if len(availability.Providers) != 1 || !availability.Providers[0].Available || len(availability.Providers[0].ConstrainedBy) != 1 || availability.Providers[0].ConstrainedBy[0].ItemID != "weekly" {
+		t.Fatalf("availability=%+v", availability.Providers)
+	}
+	if got := atomic.LoadInt32(&provider.count); got != 0 {
+		t.Fatalf("provider fetch should not be called, got %d", got)
 	}
 }
 
@@ -149,6 +238,42 @@ func (p *countingProvider) Label() string { return p.id }
 func (p *countingProvider) Fetch(context.Context, time.Time) (providers.Result, error) {
 	atomic.AddInt32(&p.count, 1)
 	return providers.Result{}, nil
+}
+
+func TestProviderMetadataAppearsInUsageAndProvidersResponses(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers.ChatGPT.Metadata = config.ProviderMetadataConfig{Tier: "high", Tags: []string{"chat"}, Models: map[string]config.MetadataConfig{"chatgpt-primary": {Tier: "extra-high", Tags: []string{"codex"}}}}
+	a := app.New(cfg, nil)
+	now := time.Now()
+	resetAt := now.Add(time.Hour).UnixMilli()
+	a.Store.UpsertSuccess("chatgpt", "ChatGPT Pro", []model.QuotaItem{{ID: "chatgpt-primary", Provider: "chatgpt", Label: "ChatGPT 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &resetAt}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, Visible: true, Reset: &model.Reset{ResetAt: resetAt, ResetWindowID: "session", Source: "provider"}}}, now, int64(time.Hour/time.Millisecond), int64((2*time.Hour)/time.Millisecond))
+	h := New(a, "config.example.yaml")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/providers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("providers status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var providers model.ProvidersResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &providers); err != nil {
+		t.Fatal(err)
+	}
+	if len(providers.Providers) <= 1 || providers.Providers[1].ID != "chatgpt" || providers.Providers[1].Tier != "high" || providers.Providers[1].Tags[0] != "chat" {
+		t.Fatalf("providers response=%+v", providers)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/usage", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("usage status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var usage model.Usage
+	if err := json.Unmarshal(rec.Body.Bytes(), &usage); err != nil {
+		t.Fatal(err)
+	}
+	if len(usage.QuotaItems) != 1 || usage.QuotaItems[0].ProviderTier != "high" || usage.QuotaItems[0].ModelTier != "extra-high" || usage.QuotaItems[0].ModelTags[0] != "codex" {
+		t.Fatalf("usage response=%+v", usage)
+	}
 }
 
 func TestUsageAnalysisEndpointUsesCachedUsageOnly(t *testing.T) {
