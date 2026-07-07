@@ -182,6 +182,42 @@ func TestProviderRecommendationsEndpointUsesCachedUsageAndQueryFilters(t *testin
 	}
 }
 
+func TestProviderRecommendationsEndpointUsesCachedUsageOnly(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.StatePath = ""
+	cfg.UsageView.Providers = []string{"counted"}
+	a := app.New(cfg, nil)
+	provider := &countingProvider{id: "counted"}
+	a.Providers = []providers.Provider{provider}
+	now := time.Now()
+	resetAt := now.Add(time.Hour).UnixMilli()
+	// Keep the cached item fresh enough for analysis while making its refresh time
+	// overdue. If the recommendation path refreshes providers instead of reading
+	// the cached snapshot, the counting provider will observe the live call.
+	a.Store.UpsertSuccess("counted", "Counted", []model.QuotaItem{
+		{ID: "counted-session", Provider: "counted", Label: "Counted 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &resetAt}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, State: "fresh", Severity: "ok", Visible: true, Reset: &model.Reset{ResetAt: resetAt, ResetWindowID: "session", Source: "provider"}},
+	}, now.Add(-time.Hour), 1, int64((24*time.Hour)/time.Millisecond))
+	h := New(a, "config.example.yaml")
+
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?providers=counted&minimumRemainingPercent=10&unit=percent", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var res analysis.ProviderRecommendationResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		if res.SelectedProvider != "counted" || len(res.RankedCandidates) != 1 || res.RankedCandidates[0].ConstrainingItem == nil {
+			t.Fatalf("recommendation response=%+v", res)
+		}
+	}
+	if got := atomic.LoadInt32(&provider.count); got != 0 {
+		t.Fatalf("provider recommendations triggered provider fetch count=%d", got)
+	}
+}
+
 func TestResetsAndAvailabilityEndpointsUseCachedUsage(t *testing.T) {
 	cfg := config.Default()
 	a := app.New(cfg, nil)
