@@ -25,7 +25,7 @@ func TestHTTPContract(t *testing.T) {
 	a := app.New(cfg, nil)
 	a.Store.UpsertSuccess("claude-code", "Claude", []model.QuotaItem{{ID: "claude-code-oauth-session", Provider: "claude-code", Label: "Claude 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling"}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, Visible: true}}, time.UnixMilli(1000), 1000, 2000)
 	h := New(a, "config.example.yaml")
-	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/usage/analysis", "/v1/expiring-usage", "/v1/providers"} {
+	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/usage/analysis", "/v1/expiring-usage", "/v1/recommendations/provider", "/v1/providers"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -97,6 +97,45 @@ func TestExpiringUsageEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/expiring-usage?includeLowConfidence=not-bool", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad query status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProviderRecommendationsEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
+	cfg := config.Default()
+	a := app.New(cfg, nil)
+	now := time.Now()
+	chatReset := now.Add(4 * 24 * time.Hour).UnixMilli()
+	claudeSessionReset := now.Add(time.Hour).UnixMilli()
+	claudeWeeklyReset := now.Add(24 * time.Hour).UnixMilli()
+	a.Store.UpsertSuccess("chatgpt", "ChatGPT Pro", []model.QuotaItem{
+		{ID: "chatgpt-secondary", Provider: "chatgpt", Label: "ChatGPT weekly", Window: model.Window{ID: "weekly", Label: "W", Kind: "weekly", ResetAt: &chatReset}, Unit: "percent", Limit: 100, Used: 45, Remaining: 55, PercentUsed: 45, Visible: true, Reset: &model.Reset{ResetAt: chatReset, ResetWindowID: "weekly", Source: "provider"}},
+	}, now, int64(time.Hour/time.Millisecond), int64((2*time.Hour)/time.Millisecond))
+	a.Store.UpsertSuccess("claude-code", "Claude", []model.QuotaItem{
+		{ID: "claude-code-oauth-session", Provider: "claude-code", Label: "Claude 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &claudeSessionReset}, Unit: "percent", Limit: 100, Used: 10, Remaining: 90, PercentUsed: 10, Visible: true, Reset: &model.Reset{ResetAt: claudeSessionReset, ResetWindowID: "session", Source: "provider"}},
+		{ID: "claude-code-oauth-weekly-all", Provider: "claude-code", Label: "Claude weekly", Window: model.Window{ID: "weekly", Label: "W", Kind: "weekly", ResetAt: &claudeWeeklyReset}, Unit: "percent", Limit: 100, Used: 90, Remaining: 10, PercentUsed: 90, Visible: true, Reset: &model.Reset{ResetAt: claudeWeeklyReset, ResetWindowID: "weekly", Source: "provider"}},
+	}, now, int64(time.Hour/time.Millisecond), int64((2*time.Hour)/time.Millisecond))
+	h := New(a, "config.example.yaml")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?task=cheap&providers=chatgpt,claude-code&minimumRemainingPercent=20&unit=percent", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var res analysis.ProviderRecommendationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.TaskProfile != analysis.TaskProfileCheap || res.SelectedProvider != "chatgpt" || len(res.RankedCandidates) != 1 {
+		t.Fatalf("unexpected recommendation response: %+v", res)
+	}
+	if res.RankedCandidates[0].Score <= 0 || res.RankedCandidates[0].ConstrainingItem == nil || res.RankedCandidates[0].ConstrainingItem.Unit != "percent" {
+		t.Fatalf("missing candidate scores/signals: %+v", res.RankedCandidates[0])
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/recommendations/provider?task=bogus", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad task status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
