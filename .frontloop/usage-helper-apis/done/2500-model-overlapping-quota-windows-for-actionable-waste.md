@@ -25,3 +25,21 @@ After local usage history exists, teach expiring-usage to account for coupled qu
 ## Implementation Notes
 
 Depends on `5000-add-local-usage-history-for-smarter-burn-rate-estimates`. Likely touches `internal/analysis/expiring_usage.go` and may need a small quota-window grouping abstraction in the analysis layer. The maths should model current short-window capacity against expected demand before the parent reset and future short-window capacity after the current short reset.
+
+
+## Completion Summary
+
+- Delegated implementation to Agentleman run agm-run-20260707135626-mqoasy and integrated after Claude judge ACCEPT verdict.
+- Resolved parent integration conflict in `internal/analysis/expiring_usage.go` by combining local-history burn-rate preference with overlap-aware window info.
+- Added raw expiring waste and actionable parent-adjusted waste fields plus overlap context/caveats.
+- Adjusted scoring/CLI to use actionable waste while preserving raw estimated waste fields for compatibility.
+- Added tests for fresh parent down-weighting, near-reset parent urgency, constrained parent capacity, and independent windows.
+
+### Files Changed
+
+- internal/analysis/expiring_usage.go
+- internal/analysis/expiring_usage_test.go
+- internal/cli/expiring_usage.go
+- .frontloop/usage-helper-apis/done/2500-model-overlapping-quota-windows-for-actionable-waste.md
+- .frontloop/usage-helper-apis/brief-overlapping-quota-windows.md
+- .frontloop/usage-helper-apis/judge-overlapping-quota-windows.md

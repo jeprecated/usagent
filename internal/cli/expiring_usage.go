@@ -232,9 +232,18 @@ func FormatExpiringUsage(res analysis.ExpiringUsageResponse) string {
 }
 
 func formatExpiringWaste(op analysis.ExpiringUsageOpportunity) string {
-	amount := formatExpiringAmount(op.EstimatedWastedAmount, op.Unit)
-	if op.EstimatedWastedPercent > 0 {
-		amount += fmt.Sprintf(" (%s%%)", formatNumber(op.EstimatedWastedPercent))
+	waste := op.ActionableWasteAmount
+	wastePercent := op.ActionableWastePercent
+	if waste == 0 && op.EstimatedWastedAmount > 0 {
+		waste = op.EstimatedWastedAmount
+		wastePercent = op.EstimatedWastedPercent
+	}
+	amount := formatExpiringAmount(waste, op.Unit)
+	if wastePercent > 0 {
+		amount += fmt.Sprintf(" (%s%%)", formatNumber(wastePercent))
+	}
+	if op.RawEstimatedWastedAmount > 0 && op.RawEstimatedWastedAmount != waste {
+		amount += fmt.Sprintf(" actionable, raw %s", formatExpiringAmount(op.RawEstimatedWastedAmount, op.Unit))
 	}
 	return amount
 }

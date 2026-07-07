@@ -124,13 +124,104 @@ func TestExpiringUsageFiltersProvidersAndResetCreditBankItems(t *testing.T) {
 	}
 }
 
+func TestExpiringUsageFreshParentDownweightsShortWindowWaste(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	usage := model.Usage{QuotaItems: []model.QuotaItem{
+		quotaItemWithWindow("chatgpt", "chatgpt-primary", "ChatGPT 5h", "session", "S", "rolling", 20, 80, now.Add(time.Hour)),
+		quotaItemWithWindow("chatgpt", "chatgpt-secondary", "ChatGPT weekly", "weekly", "W", "weekly", 5, 95, now.Add(6*24*time.Hour)),
+	}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Within: 24 * time.Hour})
+	if len(res.Opportunities) != 1 {
+		t.Fatalf("opportunities=%+v", res.Opportunities)
+	}
+	op := res.Opportunities[0]
+	if op.RawEstimatedWastedAmount != 75 || op.EstimatedWastedAmount != 75 {
+		t.Fatalf("raw waste should remain visible: %+v", op)
+	}
+	if op.ActionableWasteAmount >= 40 || op.ActionableWasteAmount <= 0 {
+		t.Fatalf("fresh parent should substantially downweight actionable waste: %+v", op)
+	}
+	if op.OverlapContext == nil || !op.OverlapContext.FreshParentFutureCapacityDownweighted || op.OverlapContext.ParentItemID != "chatgpt-secondary" {
+		t.Fatalf("missing fresh parent overlap context: %+v", op.OverlapContext)
+	}
+	if !contains(op.Caveats, "parent-window adjustment uses percent quota signals only and does not claim exact request or token capacity") {
+		t.Fatalf("missing percent-only caveat: %+v", op.Caveats)
+	}
+}
+
+func TestExpiringUsageParentNearResetKeepsShortWindowActionable(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	usage := model.Usage{QuotaItems: []model.QuotaItem{
+		quotaItemWithWindow("chatgpt", "chatgpt-primary", "ChatGPT 5h", "session", "S", "rolling", 5, 95, now.Add(4*time.Hour)),
+		quotaItemWithWindow("chatgpt", "chatgpt-secondary", "ChatGPT weekly", "weekly", "W", "weekly", 10, 90, now.Add(time.Hour)),
+	}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Within: 24 * time.Hour})
+	op, ok := opportunityByID(res, "chatgpt-primary")
+	if !ok {
+		t.Fatalf("missing short-window opportunity: %+v", res.Opportunities)
+	}
+	if op.RawEstimatedWastedAmount != 75 || op.ActionableWasteAmount != 75 {
+		t.Fatalf("near parent reset should leave current short-window waste actionable: %+v", op)
+	}
+	if op.Urgency != "extreme" {
+		t.Fatalf("parent reset should increase urgency: %+v", op)
+	}
+	if op.OverlapContext == nil || !op.OverlapContext.NearParentResetOrExhaustionUpweighted {
+		t.Fatalf("missing near-reset overlap context: %+v", op.OverlapContext)
+	}
+}
+
+func TestExpiringUsageConstrainedParentCapsSafeShortWindowSpend(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	usage := model.Usage{QuotaItems: []model.QuotaItem{
+		quotaItemWithWindow("claude-code", "claude-code-oauth-session", "Claude 5h", "session", "S", "rolling", 20, 80, now.Add(time.Hour)),
+		quotaItemWithWindow("claude-code", "claude-code-oauth-weekly-all", "Claude weekly", "weekly", "W", "weekly", 88, 12, now.Add(24*time.Hour)),
+	}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Within: 24 * time.Hour})
+	if len(res.Opportunities) != 1 {
+		t.Fatalf("opportunities=%+v", res.Opportunities)
+	}
+	op := res.Opportunities[0]
+	if op.RawEstimatedWastedAmount != 75 || op.ActionableWasteAmount != 12 {
+		t.Fatalf("parent remaining quota should cap safe actionable waste: %+v", op)
+	}
+	if op.OverlapContext == nil || !op.OverlapContext.ParentCapacityLimitedActionableWaste || op.OverlapContext.ParentRemaining != 12 {
+		t.Fatalf("missing constrained parent context: %+v", op.OverlapContext)
+	}
+}
+
+func TestExpiringUsageIndependentWindowsStayIndependentlyScored(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	usage := model.Usage{QuotaItems: []model.QuotaItem{
+		quotaItemWithWindow("openai", "openai-cost-weekly-usd", "OpenAI weekly", "week", "W", "weekly", 20, 80, now.Add(time.Hour)),
+		quotaItemWithWindow("openai", "openai-cost-monthly-usd", "OpenAI monthly", "month", "M", "monthly", 20, 80, now.Add(time.Hour)),
+	}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Within: 24 * time.Hour})
+	if len(res.Opportunities) != 2 {
+		t.Fatalf("opportunities=%+v", res.Opportunities)
+	}
+	for _, op := range res.Opportunities {
+		if op.OverlapContext != nil || op.ActionableWasteAmount != op.RawEstimatedWastedAmount {
+			t.Fatalf("independent item was overlap-adjusted: %+v", op)
+		}
+	}
+}
+
 func quotaItem(provider, id, label string, used, remaining float64, resetAt time.Time) model.QuotaItem {
+	return quotaItemWithWindow(provider, id, label, "session", "S", "rolling", used, remaining, resetAt)
+}
+
+func quotaItemWithWindow(provider, id, label, windowID, windowLabel, windowKind string, used, remaining float64, resetAt time.Time) model.QuotaItem {
 	resetMs := resetAt.UnixMilli()
 	return model.QuotaItem{
 		ID:          id,
 		Provider:    provider,
 		Label:       label,
-		Window:      model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &resetMs},
+		Window:      model.Window{ID: windowID, Label: windowLabel, Kind: windowKind, ResetAt: &resetMs},
 		Unit:        "percent",
 		Limit:       100,
 		Used:        used,
@@ -139,8 +230,17 @@ func quotaItem(provider, id, label string, used, remaining float64, resetAt time
 		State:       "fresh",
 		Severity:    "ok",
 		Visible:     true,
-		Reset:       &model.Reset{ResetAt: resetMs, ResetWindowID: "session", Source: "provider"},
+		Reset:       &model.Reset{ResetAt: resetMs, ResetWindowID: windowID, Source: "provider"},
 	}
+}
+
+func opportunityByID(res ExpiringUsageResponse, id string) (ExpiringUsageOpportunity, bool) {
+	for _, op := range res.Opportunities {
+		if op.ItemID == id {
+			return op, true
+		}
+	}
+	return ExpiringUsageOpportunity{}, false
 }
 
 func contains(list []string, want string) bool {

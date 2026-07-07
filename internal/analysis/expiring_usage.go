@@ -43,24 +43,70 @@ type ExpiringUsageResponse struct {
 }
 
 type ExpiringUsageOpportunity struct {
-	Provider                       string   `json:"provider"`
-	ItemID                         string   `json:"itemId"`
-	Label                          string   `json:"label"`
-	Unit                           string   `json:"unit"`
-	Remaining                      float64  `json:"remaining"`
-	PercentRemaining               float64  `json:"percentRemaining"`
-	ProviderTier                   string   `json:"providerTier,omitempty"`
-	ProviderTags                   []string `json:"providerTags,omitempty"`
-	ResetAt                        int64    `json:"resetAt"`
-	TimeRemainingMs                int64    `json:"timeRemainingMs"`
-	EstimatedNaturalUseBeforeReset float64  `json:"estimatedNaturalUseBeforeReset"`
-	EstimatedWastedAmount          float64  `json:"estimatedWastedAmount"`
-	EstimatedWastedPercent         float64  `json:"estimatedWastedPercent"`
-	OpportunityScore               float64  `json:"opportunityScore"`
-	Urgency                        string   `json:"urgency"`
-	Confidence                     string   `json:"confidence"`
-	Reasons                        []string `json:"reasons"`
-	Caveats                        []string `json:"caveats"`
+	Provider                       string                       `json:"provider"`
+	ItemID                         string                       `json:"itemId"`
+	Label                          string                       `json:"label"`
+	Unit                           string                       `json:"unit"`
+	Remaining                      float64                      `json:"remaining"`
+	PercentRemaining               float64                      `json:"percentRemaining"`
+	ProviderTier                   string                       `json:"providerTier,omitempty"`
+	ProviderTags                   []string                     `json:"providerTags,omitempty"`
+	ResetAt                        int64                        `json:"resetAt"`
+	TimeRemainingMs                int64                        `json:"timeRemainingMs"`
+	EstimatedNaturalUseBeforeReset float64                      `json:"estimatedNaturalUseBeforeReset"`
+	EstimatedWastedAmount          float64                      `json:"estimatedWastedAmount"`
+	EstimatedWastedPercent         float64                      `json:"estimatedWastedPercent"`
+	RawEstimatedWastedAmount       float64                      `json:"rawEstimatedWastedAmount"`
+	RawEstimatedWastedPercent      float64                      `json:"rawEstimatedWastedPercent"`
+	ActionableWasteAmount          float64                      `json:"actionableWasteAmount"`
+	ActionableWastePercent         float64                      `json:"actionableWastePercent"`
+	OpportunityScore               float64                      `json:"opportunityScore"`
+	Urgency                        string                       `json:"urgency"`
+	Confidence                     string                       `json:"confidence"`
+	Reasons                        []string                     `json:"reasons"`
+	Caveats                        []string                     `json:"caveats"`
+	OverlapContext                 *ExpiringUsageOverlapContext `json:"overlapContext,omitempty"`
+}
+
+type ExpiringUsageOverlapContext struct {
+	GroupKey                              string  `json:"groupKey"`
+	Relationship                          string  `json:"relationship"`
+	Confidence                            string  `json:"confidence"`
+	ParentItemID                          string  `json:"parentItemId"`
+	ParentLabel                           string  `json:"parentLabel"`
+	ParentWindowKind                      string  `json:"parentWindowKind"`
+	ParentResetAt                         int64   `json:"parentResetAt"`
+	ParentTimeRemainingMs                 int64   `json:"parentTimeRemainingMs"`
+	ParentRemaining                       float64 `json:"parentRemaining"`
+	ParentPercentRemaining                float64 `json:"parentPercentRemaining"`
+	ParentEstimatedNaturalUseBeforeReset  float64 `json:"parentEstimatedNaturalUseBeforeReset"`
+	FutureShortWindowsBeforeParentReset   int     `json:"futureShortWindowsBeforeParentReset"`
+	FutureShortWindowCapacityBeforeParent float64 `json:"futureShortWindowCapacityBeforeParent"`
+	ParentCapacityLimitedActionableWaste  bool    `json:"parentCapacityLimitedActionableWaste"`
+	FreshParentFutureCapacityDownweighted bool    `json:"freshParentFutureCapacityDownweighted"`
+	NearParentResetOrExhaustionUpweighted bool    `json:"nearParentResetOrExhaustionUpweighted"`
+}
+
+type expiringCandidate struct {
+	item model.QuotaItem
+	op   ExpiringUsageOpportunity
+	info quotaWindowInfo
+}
+
+type quotaWindowInfo struct {
+	item              model.QuotaItem
+	resetAt           int64
+	timeRemaining     time.Duration
+	duration          time.Duration
+	startedAt         int64
+	elapsed           time.Duration
+	familyKey         string
+	familyConfidence  string
+	familyHeuristic   bool
+	hasOverlapFamily  bool
+	parentDemand      float64
+	percentRemaining  float64
+	windowDescription string
 }
 
 func ExpiringUsage(usage model.Usage, opts ExpiringUsageOptions) ExpiringUsageResponse {
@@ -69,11 +115,17 @@ func ExpiringUsage(usage model.Usage, opts ExpiringUsageOptions) ExpiringUsageRe
 		now = time.Now()
 	}
 	out := ExpiringUsageResponse{GeneratedAt: now.UnixMilli(), Opportunities: []ExpiringUsageOpportunity{}}
+	infos := quotaWindowInfos(usage.QuotaItems, now)
 	for _, item := range usage.QuotaItems {
-		op, ok := expiringOpportunity(item, opts, now)
-		if ok {
-			out.Opportunities = append(out.Opportunities, op)
+		candidate, ok := expiringOpportunity(item, opts, now)
+		if !ok {
+			continue
 		}
+		applyOverlapAdjustments(&candidate, infos)
+		if candidate.op.ActionableWasteAmount <= 0 || candidate.op.OpportunityScore <= 0 {
+			continue
+		}
+		out.Opportunities = append(out.Opportunities, candidate.op)
 	}
 	sort.SliceStable(out.Opportunities, func(i, j int) bool {
 		left, right := out.Opportunities[i], out.Opportunities[j]
@@ -88,24 +140,23 @@ func ExpiringUsage(usage model.Usage, opts ExpiringUsageOptions) ExpiringUsageRe
 	return out
 }
 
-func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now time.Time) (ExpiringUsageOpportunity, bool) {
+func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now time.Time) (expiringCandidate, bool) {
 	if !item.Visible || item.Remaining <= 0 || isResetCreditBankItem(item) {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
 	if len(opts.Providers) > 0 && !opts.Providers[item.Provider] {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
 	percentRemaining := percentRemaining(item)
 	if percentRemaining <= 0 || percentRemaining < opts.MinimumRemainingPercent {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
-	resetAt, ok := resetAtMs(item)
+	info, ok := quotaWindowInfoForItem(item, now)
 	if !ok {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
-	timeRemaining := time.Duration(resetAt-now.UnixMilli()) * time.Millisecond
-	if timeRemaining <= 0 || (opts.Within > 0 && timeRemaining > opts.Within) {
-		return ExpiringUsageOpportunity{}, false
+	if info.timeRemaining <= 0 || (opts.Within > 0 && info.timeRemaining > opts.Within) {
+		return expiringCandidate{}, false
 	}
 
 	confidence := ConfidenceLow
@@ -113,18 +164,16 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 	natural := 0.0
 	rateSource := ""
 	if rate, ok := opts.BurnRates[BurnRateKey(item.Provider, item.ID)]; ok && rate.BurnPerMs >= 0 {
-		natural = rate.BurnPerMs * float64(timeRemaining.Milliseconds())
+		natural = rate.BurnPerMs * float64(info.timeRemaining.Milliseconds())
 		confidence = normalizedConfidence(rate.Confidence, ConfidenceHigh)
 		rateSource = rate.Source
 		if rateSource == "" {
 			rateSource = "local history burn rate"
 		}
 		caveats = append(caveats, fmt.Sprintf("natural use estimated from %s (%d samples)", rateSource, rate.Samples))
-	} else if duration, inferred := inferWindowDuration(item); inferred {
-		elapsed := duration - timeRemaining
-		if elapsed > 0 {
-			burnPerMs := item.Used / float64(elapsed.Milliseconds())
-			natural = burnPerMs * float64(timeRemaining.Milliseconds())
+	} else if info.duration > 0 {
+		if info.elapsed > 0 {
+			natural = estimateNaturalUse(item, info.duration, info.timeRemaining)
 			confidence = ConfidenceMedium
 			caveats = append(caveats, "burn rate inferred from window elapsed ratio, not historical samples")
 		} else {
@@ -138,19 +187,19 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 		caveats = append(caveats, "cached quota item is stale")
 	}
 	if !opts.IncludeLowConfidence && confidence == ConfidenceLow {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
 
 	natural = clamp(natural, 0, item.Remaining+item.Used)
 	wasted := math.Max(0, item.Remaining-natural)
 	if wasted <= 0 {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
 	wastedPercent := estimatedWastedPercent(item, wasted)
-	urgency := urgencyFor(timeRemaining)
+	urgency := urgencyFor(info.timeRemaining)
 	score := opportunityScore(percentRemaining, item.Remaining, wasted, urgency, confidence)
 	if score <= 0 {
-		return ExpiringUsageOpportunity{}, false
+		return expiringCandidate{}, false
 	}
 
 	unit := item.Unit
@@ -158,7 +207,7 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 		unit = "units"
 	}
 	reasons := []string{
-		fmt.Sprintf("%s remains with about %s until reset", formatAmount(item.Remaining, unit), formatDurationApprox(timeRemaining)),
+		fmt.Sprintf("%s remains with about %s until reset", formatAmount(item.Remaining, unit), formatDurationApprox(info.timeRemaining)),
 	}
 	if rateSource != "" {
 		reasons = append(reasons, "recent local history burn rate is unlikely to consume the remainder")
@@ -168,24 +217,331 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 		reasons = append(reasons, "remaining quota may expire unused, but burn rate confidence is low")
 	}
 
-	return ExpiringUsageOpportunity{
+	op := ExpiringUsageOpportunity{
 		Provider:                       item.Provider,
 		ItemID:                         item.ID,
 		Label:                          item.Label,
 		Unit:                           unit,
 		Remaining:                      round3(item.Remaining),
 		PercentRemaining:               round3(percentRemaining),
-		ResetAt:                        resetAt,
-		TimeRemainingMs:                timeRemaining.Milliseconds(),
+		ResetAt:                        info.resetAt,
+		TimeRemainingMs:                info.timeRemaining.Milliseconds(),
 		EstimatedNaturalUseBeforeReset: round3(natural),
 		EstimatedWastedAmount:          round3(wasted),
 		EstimatedWastedPercent:         round3(wastedPercent),
+		RawEstimatedWastedAmount:       round3(wasted),
+		RawEstimatedWastedPercent:      round3(wastedPercent),
+		ActionableWasteAmount:          round3(wasted),
+		ActionableWastePercent:         round3(wastedPercent),
 		OpportunityScore:               round3(score),
 		Urgency:                        urgency,
 		Confidence:                     confidence,
 		Reasons:                        reasons,
 		Caveats:                        caveats,
+	}
+	return expiringCandidate{item: item, op: op, info: info}, true
+}
+
+func quotaWindowInfos(items []model.QuotaItem, now time.Time) []quotaWindowInfo {
+	infos := make([]quotaWindowInfo, 0, len(items))
+	for _, item := range items {
+		if !item.Visible || item.Remaining < 0 || isResetCreditBankItem(item) {
+			continue
+		}
+		info, ok := quotaWindowInfoForItem(item, now)
+		if ok && info.timeRemaining > 0 && info.duration > 0 {
+			infos = append(infos, info)
+		}
+	}
+	return infos
+}
+
+func quotaWindowInfoForItem(item model.QuotaItem, now time.Time) (quotaWindowInfo, bool) {
+	resetAt, ok := resetAtMs(item)
+	if !ok {
+		return quotaWindowInfo{}, false
+	}
+	duration, inferred := inferWindowDuration(item)
+	if !inferred {
+		duration = 0
+	}
+	timeRemaining := time.Duration(resetAt-now.UnixMilli()) * time.Millisecond
+	startedAt := int64(0)
+	elapsed := time.Duration(0)
+	if duration > 0 {
+		startedAt = resetAt - duration.Milliseconds()
+		elapsed = time.Duration(now.UnixMilli()-startedAt) * time.Millisecond
+	}
+	familyKey, familyConfidence, heuristic, hasFamily := overlapFamily(item)
+	return quotaWindowInfo{
+		item:              item,
+		resetAt:           resetAt,
+		timeRemaining:     timeRemaining,
+		duration:          duration,
+		startedAt:         startedAt,
+		elapsed:           elapsed,
+		familyKey:         familyKey,
+		familyConfidence:  familyConfidence,
+		familyHeuristic:   heuristic,
+		hasOverlapFamily:  hasFamily,
+		parentDemand:      estimateNaturalUse(item, duration, timeRemaining),
+		percentRemaining:  percentRemaining(item),
+		windowDescription: windowDescription(item),
 	}, true
+}
+
+func applyOverlapAdjustments(candidate *expiringCandidate, infos []quotaWindowInfo) {
+	child := candidate.info
+	parent, found := bestParentWindow(child, infos)
+	if !found {
+		if isShortWindow(child.item, child.duration) {
+			candidate.op.Caveats = append(candidate.op.Caveats, "no overlapping longer-window quota item with the same provider/model family is available in cached usage; actionable waste equals the raw estimate")
+		}
+		return
+	}
+
+	rawWaste := candidate.op.RawEstimatedWastedAmount
+	actionable := rawWaste
+	parentDemand := clamp(parent.parentDemand, 0, parent.item.Remaining+parent.item.Used)
+	parentRemaining := math.Max(0, parent.item.Remaining)
+	parentPercentRemaining := percentRemaining(parent.item)
+	futureWindows := futureShortWindows(child, parent)
+	futureCapacity := futureShortCapacity(child, futureWindows)
+	parentRemainingRatio := 0.0
+	if parent.duration > 0 {
+		parentRemainingRatio = clamp(float64(parent.timeRemaining)/float64(parent.duration), 0, 1)
+	}
+	parentNearReset := parent.timeRemaining <= child.duration || parentRemainingRatio <= 0.15
+	parentConstrained := parentPercentRemaining > 0 && parentPercentRemaining <= 25
+
+	ctx := &ExpiringUsageOverlapContext{
+		GroupKey:                              child.familyKey,
+		Relationship:                          "inferred-overlap",
+		Confidence:                            minConfidence(child.familyConfidence, parent.familyConfidence),
+		ParentItemID:                          parent.item.ID,
+		ParentLabel:                           parent.item.Label,
+		ParentWindowKind:                      parent.item.Window.Kind,
+		ParentResetAt:                         parent.resetAt,
+		ParentTimeRemainingMs:                 parent.timeRemaining.Milliseconds(),
+		ParentRemaining:                       round3(parentRemaining),
+		ParentPercentRemaining:                round3(parentPercentRemaining),
+		ParentEstimatedNaturalUseBeforeReset:  round3(parentDemand),
+		FutureShortWindowsBeforeParentReset:   futureWindows,
+		FutureShortWindowCapacityBeforeParent: round3(futureCapacity),
+	}
+
+	candidate.op.Caveats = append(candidate.op.Caveats, overlapCaveats(child, parent)...)
+	candidate.op.Reasons = append(candidate.op.Reasons, fmt.Sprintf("overlaps longer %s quota %s with %s remaining", parent.windowDescription, displayName(parent.item), formatAmount(parentRemaining, unitOrDefault(parent.item.Unit))))
+
+	if parentRemaining < actionable {
+		actionable = parentRemaining
+		ctx.ParentCapacityLimitedActionableWaste = true
+		candidate.op.Reasons = append(candidate.op.Reasons, "actionable waste is capped by the overlapping parent window's remaining capacity")
+	}
+
+	freshParent := parentRemainingRatio >= 0.50 && parentPercentRemaining >= 40 && !parentNearReset && !parentConstrained
+	futureCanSatisfyDemand := futureWindows > 0 && futureCapacity >= math.Max(parentDemand, child.item.Remaining)
+	if freshParent && futureCanSatisfyDemand {
+		actionable *= 0.25
+		ctx.FreshParentFutureCapacityDownweighted = true
+		candidate.op.Reasons = append(candidate.op.Reasons, "fresh parent window and future short-window resets can likely satisfy forecast demand, so current short-window waste is down-weighted")
+	}
+
+	if parentNearReset || parentConstrained {
+		ctx.NearParentResetOrExhaustionUpweighted = true
+		candidate.op.Reasons = append(candidate.op.Reasons, "parent window is near reset or capacity-constrained, so current short-window capacity is more likely to matter")
+		candidate.op.Urgency = moreUrgent(candidate.op.Urgency, urgencyFor(parent.timeRemaining))
+	}
+
+	actionable = clamp(actionable, 0, rawWaste)
+	candidate.op.ActionableWasteAmount = round3(actionable)
+	candidate.op.ActionableWastePercent = round3(estimatedWastedPercent(child.item, actionable))
+	// Preserve estimatedWasted* as the raw snapshot-only expiring amount for
+	// compatibility; rank by the parent-adjusted actionable amount.
+	candidate.op.EstimatedWastedAmount = candidate.op.RawEstimatedWastedAmount
+	candidate.op.EstimatedWastedPercent = candidate.op.RawEstimatedWastedPercent
+	candidate.op.OpportunityScore = round3(opportunityScore(candidate.op.PercentRemaining, child.item.Remaining, actionable, candidate.op.Urgency, candidate.op.Confidence))
+	candidate.op.OverlapContext = ctx
+}
+
+func bestParentWindow(child quotaWindowInfo, infos []quotaWindowInfo) (quotaWindowInfo, bool) {
+	if !child.hasOverlapFamily || child.duration <= 0 {
+		return quotaWindowInfo{}, false
+	}
+	parents := []quotaWindowInfo{}
+	for _, candidate := range infos {
+		if candidate.item.ID == child.item.ID || candidate.item.Provider != child.item.Provider || !candidate.hasOverlapFamily {
+			continue
+		}
+		if candidate.familyKey != child.familyKey || !compatibleUnits(child.item.Unit, candidate.item.Unit) {
+			continue
+		}
+		if candidate.duration <= child.duration || !windowsOverlap(child, candidate) {
+			continue
+		}
+		parents = append(parents, candidate)
+	}
+	if len(parents) == 0 {
+		return quotaWindowInfo{}, false
+	}
+	sort.SliceStable(parents, func(i, j int) bool {
+		if parents[i].duration == parents[j].duration {
+			return parents[i].resetAt < parents[j].resetAt
+		}
+		return parents[i].duration < parents[j].duration
+	})
+	return parents[0], true
+}
+
+func windowsOverlap(a, b quotaWindowInfo) bool {
+	return a.startedAt < b.resetAt && b.startedAt < a.resetAt
+}
+
+func overlapFamily(item model.QuotaItem) (key, confidence string, heuristic bool, ok bool) {
+	provider := strings.ToLower(strings.TrimSpace(item.Provider))
+	id := strings.ToLower(strings.TrimSpace(item.ID))
+	windowID := strings.ToLower(strings.TrimSpace(item.Window.ID))
+	windowKind := strings.ToLower(strings.TrimSpace(item.Window.Kind))
+	if provider == "" || id == "" {
+		return "", "", false, false
+	}
+
+	switch provider {
+	case "chatgpt":
+		if id == "chatgpt-primary" || id == "chatgpt-secondary" {
+			return provider + ":account", ConfidenceMedium, false, true
+		}
+		if base, matched := stripAnySuffix(id, "-primary", "-secondary"); matched {
+			return provider + ":" + base, ConfidenceMedium, true, true
+		}
+	case "claude-code":
+		if id == "claude-code-oauth-session" || id == "claude-code-oauth-weekly-all" {
+			return provider + ":account", ConfidenceMedium, false, true
+		}
+		if base, matched := stripAnySuffix(id, "-session", "-weekly-all", "-weekly", "-monthly"); matched {
+			return provider + ":" + base, ConfidenceLow, true, true
+		}
+	case "z-ai":
+		if strings.HasPrefix(id, "z-ai-tokens-limit-") && (windowID == "session" || windowID == "weekly" || windowKind == "rolling" || windowKind == "weekly") {
+			return provider + ":tokens-limit", ConfidenceMedium, true, true
+		}
+	}
+
+	if base, matched := stripAnySuffix(id, "-primary", "-secondary", "-session", "-rolling", "-5h", "-weekly", "-week", "-monthly", "-month", "-daily", "-day"); matched && base != "" {
+		return provider + ":" + base, ConfidenceLow, true, true
+	}
+	return "", "", false, false
+}
+
+func stripAnySuffix(s string, suffixes ...string) (string, bool) {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) && len(s) > len(suffix) {
+			return strings.TrimSuffix(s, suffix), true
+		}
+	}
+	return s, false
+}
+
+func compatibleUnits(a, b string) bool {
+	return strings.EqualFold(unitOrDefault(a), unitOrDefault(b))
+}
+
+func futureShortWindows(child, parent quotaWindowInfo) int {
+	if child.duration <= 0 || parent.resetAt <= child.resetAt {
+		return 0
+	}
+	windows := int(time.Duration(parent.resetAt-child.resetAt) * time.Millisecond / child.duration)
+	if windows < 0 {
+		return 0
+	}
+	return windows
+}
+
+func futureShortCapacity(child quotaWindowInfo, windows int) float64 {
+	if windows <= 0 {
+		return 0
+	}
+	capacity := child.item.Limit
+	if capacity <= 0 {
+		capacity = child.item.Used + child.item.Remaining
+	}
+	if capacity <= 0 {
+		capacity = child.item.Remaining
+	}
+	return float64(windows) * capacity
+}
+
+func estimateNaturalUse(item model.QuotaItem, duration, timeRemaining time.Duration) float64 {
+	if duration <= 0 {
+		return 0
+	}
+	elapsed := duration - timeRemaining
+	if elapsed <= 0 {
+		return 0
+	}
+	burnPerMs := item.Used / float64(elapsed.Milliseconds())
+	return clamp(burnPerMs*float64(timeRemaining.Milliseconds()), 0, item.Remaining+item.Used)
+}
+
+func overlapCaveats(child, parent quotaWindowInfo) []string {
+	caveats := []string{}
+	if child.familyHeuristic || parent.familyHeuristic || child.familyConfidence == ConfidenceLow || parent.familyConfidence == ConfidenceLow {
+		caveats = append(caveats, "overlapping quota relationship is inferred heuristically from provider, item IDs, labels, units, and reset windows")
+	} else {
+		caveats = append(caveats, "overlapping quota relationship is inferred from cached provider window metadata")
+	}
+	if child.item.Unit == "percent" || child.item.Unit == "%" || parent.item.Unit == "percent" || parent.item.Unit == "%" {
+		caveats = append(caveats, "parent-window adjustment uses percent quota signals only and does not claim exact request or token capacity")
+	}
+	return caveats
+}
+
+func minConfidence(a, b string) string {
+	order := map[string]int{ConfidenceLow: 0, ConfidenceMedium: 1, ConfidenceHigh: 2}
+	if order[a] <= order[b] {
+		return a
+	}
+	return b
+}
+
+func moreUrgent(a, b string) string {
+	order := map[string]int{"low": 0, "normal": 1, "high": 2, "extreme": 3}
+	if order[b] > order[a] {
+		return b
+	}
+	return a
+}
+
+func isShortWindow(item model.QuotaItem, duration time.Duration) bool {
+	text := strings.ToLower(strings.Join([]string{item.Window.Kind, item.Window.ID, item.Window.Label, item.ID, item.Label}, " "))
+	return duration > 0 && duration <= 6*time.Hour || strings.Contains(text, "session") || strings.Contains(text, "5h")
+}
+
+func displayName(item model.QuotaItem) string {
+	if strings.TrimSpace(item.Label) != "" {
+		return item.Label
+	}
+	return item.ID
+}
+
+func unitOrDefault(unit string) string {
+	if unit == "" {
+		return "units"
+	}
+	return unit
+}
+
+func windowDescription(item model.QuotaItem) string {
+	if strings.TrimSpace(item.Window.Kind) != "" {
+		return item.Window.Kind
+	}
+	if strings.TrimSpace(item.Window.Label) != "" {
+		return item.Window.Label
+	}
+	if strings.TrimSpace(item.Window.ID) != "" {
+		return item.Window.ID
+	}
+	return "parent"
 }
 
 func resetAtMs(item model.QuotaItem) (int64, bool) {
