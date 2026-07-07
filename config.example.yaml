@@ -20,6 +20,10 @@ providers:
     enabled: false
     authPath: "~/.codex/auth.json"
     endpointUrl: "https://chatgpt.com/backend-api/wham/usage"
+    resetCreditsEndpointUrl: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+    resetConsumeEndpointUrl: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+    # Mutating API endpoint remains disabled unless explicitly enabled.
+    allowResetConsume: false
     tokenEnv: "CHATGPT_ACCESS_TOKEN"
     accountIdEnv: "CHATGPT_ACCOUNT_ID"
     userAgent: "usagent/0.1"

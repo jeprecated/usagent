@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,5 +46,66 @@ func TestHTTPContract(t *testing.T) {
 	}
 	if usage.SchemaVersion != 2 || usage.Service != "usagent" || len(usage.Providers) != 3 || len(usage.QuotaItems) != 1 {
 		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestChatGPTResetCreditsEndpoints(t *testing.T) {
+	t.Setenv("CHATGPT_ACCESS_TOKEN", "token")
+	t.Setenv("CHATGPT_ACCOUNT_ID", "acct")
+	var consumed bool
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/credits":
+			fmt.Fprint(w, `{"available_count":1,"credits":[{"id":"credit-1","status":"available","expires_at":"2026-07-12T01:33:14Z"}]}`)
+		case "/consume":
+			consumed = true
+			fmt.Fprint(w, `{"windows_reset":1,"code":"reset","redeemed_at":"2026-06-13T13:12:31Z"}`)
+		case "/usage":
+			fmt.Fprint(w, `{"rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000},"secondary_window":{"used_percent":0,"limit_window_seconds":604800}},"rate_limit_reset_credits":{"available_count":0}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	cfg := config.Default()
+	cfg.Providers.ChatGPT.Enabled = true
+	cfg.Providers.ChatGPT.TokenEnv = "CHATGPT_ACCESS_TOKEN"
+	cfg.Providers.ChatGPT.AccountIDEnv = "CHATGPT_ACCOUNT_ID"
+	cfg.Providers.ChatGPT.EndpointURL = provider.URL + "/usage"
+	cfg.Providers.ChatGPT.ResetCreditsEndpointURL = provider.URL + "/credits"
+	cfg.Providers.ChatGPT.ResetConsumeEndpointURL = provider.URL + "/consume"
+	a := app.New(cfg, nil)
+	h := New(a, "config.example.yaml")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/chatgpt/reset-credits", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed model.ChatGPTResetCreditsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil || listed.AvailableCount != 1 || len(listed.Credits) != 1 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+
+	body := []byte(`{"creditId":"credit-1","redeemRequestId":"req-1","confirm":"consume-chatgpt-reset-credit"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chatgpt/reset-credits/consume", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-usagent-action", "consume-chatgpt-reset-credit")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || consumed {
+		t.Fatalf("consume without opt-in status=%d consumed=%v body=%s", rec.Code, consumed, rec.Body.String())
+	}
+
+	cfg.Providers.ChatGPT.AllowResetConsume = true
+	a = app.New(cfg, nil)
+	h = New(a, "config.example.yaml")
+	req = httptest.NewRequest(http.MethodPost, "/v1/chatgpt/reset-credits/consume", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-usagent-action", "consume-chatgpt-reset-credit")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !consumed {
+		t.Fatalf("consume status=%d consumed=%v body=%s", rec.Code, consumed, rec.Body.String())
 	}
 }

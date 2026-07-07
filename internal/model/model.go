@@ -76,3 +76,30 @@ type Usage struct {
 type ProvidersResponse struct {
 	Providers []Provider `json:"providers"`
 }
+
+type ChatGPTResetCredit struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Title     string `json:"title,omitempty"`
+	GrantedAt string `json:"grantedAt,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+}
+
+type ChatGPTResetCreditsResponse struct {
+	Provider       string                 `json:"provider"`
+	AvailableCount int                    `json:"availableCount"`
+	Credits        []ChatGPTResetCredit   `json:"credits"`
+	FetchedAt      int64                  `json:"fetchedAt"`
+	Raw            map[string]interface{} `json:"raw,omitempty"`
+}
+
+type ChatGPTResetConsumeResponse struct {
+	Provider        string                 `json:"provider"`
+	CreditID        string                 `json:"creditId"`
+	RedeemRequestID string                 `json:"redeemRequestId"`
+	ConsumedAt      int64                  `json:"consumedAt"`
+	WindowsReset    int                    `json:"windowsReset,omitempty"`
+	Code            string                 `json:"code,omitempty"`
+	RedeemedAt      string                 `json:"redeemedAt,omitempty"`
+	Raw             map[string]interface{} `json:"raw,omitempty"`
+}

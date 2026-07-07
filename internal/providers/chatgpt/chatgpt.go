@@ -1,8 +1,11 @@
 package chatgpt
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,29 +70,31 @@ type additionalLimit struct {
 	DisplayName     string       `json:"display_name"`
 	PrimaryWindow   *usageWindow `json:"primary_window"`
 	SecondaryWindow *usageWindow `json:"secondary_window"`
+	RateLimit       *struct {
+		PrimaryWindow   *usageWindow `json:"primary_window"`
+		SecondaryWindow *usageWindow `json:"secondary_window"`
+	} `json:"rate_limit"`
+}
+
+type resetCreditsPayload struct {
+	AvailableCount int `json:"available_count"`
+	Credits        []struct {
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		Title     string `json:"title"`
+		GrantedAt string `json:"granted_at"`
+		ExpiresAt string `json:"expires_at"`
+	} `json:"credits"`
+}
+
+type consumePayload struct {
+	WindowsReset int    `json:"windows_reset"`
+	Code         string `json:"code"`
+	RedeemedAt   string `json:"redeemed_at"`
 }
 
 func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, error) {
-	token, accountID, err := credentials(p.cfg)
-	if err != nil {
-		return providers.Result{}, err
-	}
-	if accountID == "" {
-		accountID = accountIDFromJWT(token)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.EndpointURL, nil)
-	if err != nil {
-		return providers.Result{}, err
-	}
-	req.Header.Set("authorization", "Bearer "+token)
-	req.Header.Set("accept", "application/json")
-	if accountID != "" {
-		req.Header.Set("chatgpt-account-id", accountID)
-	}
-	if p.cfg.UserAgent != "" {
-		req.Header.Set("user-agent", p.cfg.UserAgent)
-	}
-	resp, err := p.client.Do(req)
+	resp, err := p.do(ctx, http.MethodGet, p.cfg.EndpointURL, nil)
 	if err != nil {
 		return providers.Result{}, err
 	}
@@ -103,6 +108,91 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 		return providers.Result{}, err
 	}
 	return providers.Result{Items: Normalize(payload, now, p.cfg.RefreshMs, p.cfg.StaleMs)}, nil
+}
+
+func (p *Provider) ListResetCredits(ctx context.Context, now time.Time) (model.ChatGPTResetCreditsResponse, error) {
+	resp, err := p.do(ctx, http.MethodGet, p.cfg.ResetCreditsEndpointURL, nil)
+	if err != nil {
+		return model.ChatGPTResetCreditsResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		retry := ratelimit.RetryAfter(resp.Header, now)
+		return model.ChatGPTResetCreditsResponse{}, providers.HTTPStatusError("chatgpt reset credits", resp.StatusCode, retry, resp.Body)
+	}
+	var payload resetCreditsPayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.ChatGPTResetCreditsResponse{}, err
+	}
+	credits := make([]model.ChatGPTResetCredit, 0, len(payload.Credits))
+	for _, c := range payload.Credits {
+		credits = append(credits, model.ChatGPTResetCredit{ID: c.ID, Status: c.Status, Title: c.Title, GrantedAt: c.GrantedAt, ExpiresAt: c.ExpiresAt})
+	}
+	return model.ChatGPTResetCreditsResponse{Provider: "chatgpt", AvailableCount: payload.AvailableCount, Credits: credits, FetchedAt: now.UnixMilli()}, nil
+}
+
+func (p *Provider) ConsumeResetCredit(ctx context.Context, creditID, redeemRequestID string, now time.Time) (model.ChatGPTResetConsumeResponse, error) {
+	creditID = strings.TrimSpace(creditID)
+	if creditID == "" {
+		return model.ChatGPTResetConsumeResponse{}, errors.New("creditId is required")
+	}
+	if redeemRequestID == "" {
+		var err error
+		redeemRequestID, err = randomRedeemRequestID()
+		if err != nil {
+			return model.ChatGPTResetConsumeResponse{}, err
+		}
+	}
+	body, err := json.Marshal(map[string]string{"credit_id": creditID, "redeem_request_id": redeemRequestID})
+	if err != nil {
+		return model.ChatGPTResetConsumeResponse{}, err
+	}
+	resp, err := p.do(ctx, http.MethodPost, p.cfg.ResetConsumeEndpointURL, bytes.NewReader(body))
+	if err != nil {
+		return model.ChatGPTResetConsumeResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		retry := ratelimit.RetryAfter(resp.Header, now)
+		return model.ChatGPTResetConsumeResponse{}, providers.HTTPStatusError("chatgpt consume reset credit", resp.StatusCode, retry, resp.Body)
+	}
+	var payload consumePayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.ChatGPTResetConsumeResponse{}, err
+	}
+	return model.ChatGPTResetConsumeResponse{Provider: "chatgpt", CreditID: creditID, RedeemRequestID: redeemRequestID, ConsumedAt: now.UnixMilli(), WindowsReset: payload.WindowsReset, Code: payload.Code, RedeemedAt: payload.RedeemedAt}, nil
+}
+
+func (p *Provider) do(ctx context.Context, method, url string, body *bytes.Reader) (*http.Response, error) {
+	token, accountID, err := credentials(p.cfg)
+	if err != nil {
+		return nil, err
+	}
+	if accountID == "" {
+		accountID = accountIDFromJWT(token)
+	}
+	var reqBody *bytes.Reader
+	if body == nil {
+		reqBody = bytes.NewReader(nil)
+	} else {
+		reqBody = body
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("authorization", "Bearer "+token)
+	req.Header.Set("accept", "application/json")
+	if method == http.MethodPost {
+		req.Header.Set("content-type", "application/json")
+	}
+	if accountID != "" {
+		req.Header.Set("chatgpt-account-id", accountID)
+	}
+	if p.cfg.UserAgent != "" {
+		req.Header.Set("user-agent", p.cfg.UserAgent)
+	}
+	return p.client.Do(req)
 }
 
 func credentials(cfg config.ChatGPTConfig) (token, accountID string, err error) {
@@ -154,11 +244,20 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 			name = "ChatGPT model"
 		}
 		baseID := stableID("chatgpt-" + name)
-		if limit.PrimaryWindow != nil {
-			items = append(items, windowItem(baseID+"-primary", name+" 5h", *limit.PrimaryWindow, now, refreshMs, staleMs))
+		primary, secondary := limit.PrimaryWindow, limit.SecondaryWindow
+		if limit.RateLimit != nil {
+			if primary == nil {
+				primary = limit.RateLimit.PrimaryWindow
+			}
+			if secondary == nil {
+				secondary = limit.RateLimit.SecondaryWindow
+			}
 		}
-		if limit.SecondaryWindow != nil {
-			items = append(items, windowItem(baseID+"-secondary", name+" weekly", *limit.SecondaryWindow, now, refreshMs, staleMs))
+		if primary != nil {
+			items = append(items, windowItem(baseID+"-primary", name+" 5h", *primary, now, refreshMs, staleMs))
+		}
+		if secondary != nil {
+			items = append(items, windowItem(baseID+"-secondary", name+" weekly", *secondary, now, refreshMs, staleMs))
 		}
 	}
 	if payload.ResetCredits != nil {
@@ -255,6 +354,14 @@ func stableID(v string) string {
 	}
 	return strings.Trim(b.String(), "-")
 }
+func randomRedeemRequestID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {

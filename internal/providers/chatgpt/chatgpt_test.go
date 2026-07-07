@@ -3,6 +3,7 @@ package chatgpt
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +70,47 @@ func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {
 	credits := res.Items[byID["chatgpt-rate-limit-reset-credits"]]
 	if credits.Unit != "credits" || credits.Remaining != 2 || credits.Window.ID != "resetCredits" {
 		t.Fatalf("credits=%+v", credits)
+	}
+}
+
+func TestResetCreditListAndConsume(t *testing.T) {
+	t.Setenv("CHATGPT_ACCESS_TOKEN", "token")
+	t.Setenv("CHATGPT_ACCOUNT_ID", "acct")
+	var consumeBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("chatgpt-account-id") != "acct" || r.Header.Get("authorization") != "Bearer token" {
+			t.Fatalf("bad auth headers: %v", r.Header)
+		}
+		switch r.URL.Path {
+		case "/credits":
+			fmt.Fprint(w, `{"available_count":1,"credits":[{"id":"RateLimitResetCredit_1","status":"available","title":"One free rate limit reset","granted_at":"2026-06-12T01:33:14Z","expires_at":"2026-07-12T01:33:14Z"}]}`)
+		case "/consume":
+			if r.Method != http.MethodPost || !strings.HasPrefix(r.Header.Get("content-type"), "application/json") {
+				t.Fatalf("bad consume request method=%s ct=%s", r.Method, r.Header.Get("content-type"))
+			}
+			if err := json.NewDecoder(r.Body).Decode(&consumeBody); err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprint(w, `{"windows_reset":1,"code":"reset","redeemed_at":"2026-06-13T13:12:31Z"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	p := NewWithClient(config.ChatGPTConfig{TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", ResetCreditsEndpointURL: srv.URL + "/credits", ResetConsumeEndpointURL: srv.URL + "/consume"}, srv.Client())
+	credits, err := p.ListResetCredits(context.Background(), time.UnixMilli(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credits.AvailableCount != 1 || len(credits.Credits) != 1 || credits.Credits[0].ExpiresAt == "" {
+		t.Fatalf("credits=%+v", credits)
+	}
+	consume, err := p.ConsumeResetCredit(context.Background(), "RateLimitResetCredit_1", "req-1", time.UnixMilli(2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consume.WindowsReset != 1 || consume.Code != "reset" || consumeBody["credit_id"] != "RateLimitResetCredit_1" || consumeBody["redeem_request_id"] != "req-1" {
+		t.Fatalf("consume=%+v body=%v", consume, consumeBody)
 	}
 }
 

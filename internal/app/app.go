@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -143,6 +144,39 @@ func (a *App) Usage(now time.Time) model.Usage {
 	u := a.Store.Overview(now, a.ProviderModels())
 	u.StartedAt = a.StartedAt
 	return u
+}
+
+func (a *App) ChatGPTResetCredits(ctx context.Context, now time.Time) (model.ChatGPTResetCreditsResponse, error) {
+	p := a.chatGPTProvider()
+	if p == nil {
+		return model.ChatGPTResetCreditsResponse{}, errors.New("chatgpt provider is not enabled")
+	}
+	return p.ListResetCredits(ctx, now)
+}
+
+func (a *App) ConsumeChatGPTResetCredit(ctx context.Context, creditID, redeemRequestID string, now time.Time) (model.ChatGPTResetConsumeResponse, error) {
+	if !a.Cfg.Providers.ChatGPT.AllowResetConsume {
+		return model.ChatGPTResetConsumeResponse{}, errors.New("chatgpt reset credit consumption is disabled")
+	}
+	p := a.chatGPTProvider()
+	if p == nil {
+		return model.ChatGPTResetConsumeResponse{}, errors.New("chatgpt provider is not enabled")
+	}
+	res, err := p.ConsumeResetCredit(ctx, creditID, redeemRequestID, now)
+	if err != nil {
+		return model.ChatGPTResetConsumeResponse{}, err
+	}
+	a.RefreshOne(ctx, p, now)
+	return res, nil
+}
+
+func (a *App) chatGPTProvider() *chatgpt.Provider {
+	for _, p := range a.Providers {
+		if cp, ok := p.(*chatgpt.Provider); ok {
+			return cp
+		}
+	}
+	return nil
 }
 
 func (a *App) RefreshDue(ctx context.Context, now time.Time) {

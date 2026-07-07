@@ -38,6 +38,8 @@ usagent usage --offline  # skip daemon lookup and refresh/read locally
 - `GET /readyz`
 - `GET /v1/usage`
 - `GET /v1/providers`
+- `GET /v1/chatgpt/reset-credits`
+- `POST /v1/chatgpt/reset-credits/consume`
 
 `/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling.
 
@@ -51,7 +53,18 @@ Secrets must be provided by runtime environment variables or secret files. Do no
 
 Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses. When the endpoint includes `extra_usage`, usagent exposes enabled Extra Credits as a monthly currency quota item, converting the API's cent values to dollars/euros/etc.
 
-ChatGPT Pro/Codex subscription usage is fetched from ChatGPT's private `/backend-api/wham/usage` endpoint when `providers.chatgpt.enabled=true`. By default usagent reads the Codex CLI OAuth login from `~/.codex/auth.json`; alternatively set `CHATGPT_ACCESS_TOKEN` and optionally `CHATGPT_ACCOUNT_ID`.
+ChatGPT Pro/Codex subscription usage is fetched from ChatGPT's private `/backend-api/wham/usage` endpoint when `providers.chatgpt.enabled=true`. By default usagent reads the Codex CLI OAuth login from `~/.codex/auth.json`; alternatively set `CHATGPT_ACCESS_TOKEN` and optionally `CHATGPT_ACCOUNT_ID`. Reset banking is represented in normal stats as `chatgpt-rate-limit-reset-credits`; detailed banked reset-credit records are available from `GET /v1/chatgpt/reset-credits`.
+
+Redeeming a reset credit is intentionally gated. It is disabled unless `providers.chatgpt.allowResetConsume=true`, and callers must use JSON, the confirmation header, and a confirmation body:
+
+```sh
+curl -fsS -X POST http://127.0.0.1:8788/v1/chatgpt/reset-credits/consume \
+  -H 'content-type: application/json' \
+  -H 'x-usagent-action: consume-chatgpt-reset-credit' \
+  -d '{"creditId":"RateLimitResetCredit_...","confirm":"consume-chatgpt-reset-credit"}'
+```
+
+This endpoint calls OpenAI's `/backend-api/wham/rate-limit-reset-credits/consume` endpoint and spends a real banked reset credit.
 
 OpenAI API spend is separate and optional. It is fetched from the Admin Costs API when `providers.openai.enabled=true`. This does **not** track ChatGPT Plus/Pro subscription quota. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
 

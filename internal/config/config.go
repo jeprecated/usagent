@@ -17,6 +17,7 @@ const DefaultStateBase = "~/.local/state"
 
 const (
 	MinClaudeOAuthRefreshMs = int64((5 * time.Minute) / time.Millisecond)
+	MinChatGPTRefreshMs     = int64((5 * time.Minute) / time.Millisecond)
 	MinOpenAIRefreshMs      = int64((10 * time.Minute) / time.Millisecond)
 	MinZAIRefreshMs         = int64((5 * time.Minute) / time.Millisecond)
 )
@@ -58,14 +59,17 @@ type ClaudeOAuthConfig struct {
 }
 
 type ChatGPTConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	AuthPath     string `yaml:"authPath"`
-	EndpointURL  string `yaml:"endpointUrl"`
-	TokenEnv     string `yaml:"tokenEnv"`
-	AccountIDEnv string `yaml:"accountIdEnv"`
-	UserAgent    string `yaml:"userAgent"`
-	RefreshMs    int64  `yaml:"refreshMs"`
-	StaleMs      int64  `yaml:"staleMs"`
+	Enabled                 bool   `yaml:"enabled"`
+	AuthPath                string `yaml:"authPath"`
+	EndpointURL             string `yaml:"endpointUrl"`
+	ResetCreditsEndpointURL string `yaml:"resetCreditsEndpointUrl"`
+	ResetConsumeEndpointURL string `yaml:"resetConsumeEndpointUrl"`
+	AllowResetConsume       bool   `yaml:"allowResetConsume"`
+	TokenEnv                string `yaml:"tokenEnv"`
+	AccountIDEnv            string `yaml:"accountIdEnv"`
+	UserAgent               string `yaml:"userAgent"`
+	RefreshMs               int64  `yaml:"refreshMs"`
+	StaleMs                 int64  `yaml:"staleMs"`
 }
 
 type OpenAIConfig struct {
@@ -157,20 +161,23 @@ type QuotaConfig struct {
 }
 
 type QuotaProvider struct {
-	ID                     string   `yaml:"id"`
-	Label                  string   `yaml:"label"`
-	Source                 string   `yaml:"source"`
-	StaleMs                int64    `yaml:"staleMs"`
-	RefreshMs              int64    `yaml:"refreshMs"`
-	HighlightedBucket      string   `yaml:"highlightedBucket"`
-	HighlightedBucketLabel string   `yaml:"highlightedBucketLabel"`
-	EndpointURL            string   `yaml:"endpointUrl"`
-	APIKeyEnv              string   `yaml:"apiKeyEnv"`
-	TokenEnv               string   `yaml:"tokenEnv"`
-	AccountIDEnv           string   `yaml:"accountIdEnv"`
-	AuthPath               string   `yaml:"authPath"`
-	UserAgent              string   `yaml:"userAgent"`
-	Budgets                []Budget `yaml:"budgets"`
+	ID                      string   `yaml:"id"`
+	Label                   string   `yaml:"label"`
+	Source                  string   `yaml:"source"`
+	StaleMs                 int64    `yaml:"staleMs"`
+	RefreshMs               int64    `yaml:"refreshMs"`
+	HighlightedBucket       string   `yaml:"highlightedBucket"`
+	HighlightedBucketLabel  string   `yaml:"highlightedBucketLabel"`
+	EndpointURL             string   `yaml:"endpointUrl"`
+	ResetCreditsEndpointURL string   `yaml:"resetCreditsEndpointUrl"`
+	ResetConsumeEndpointURL string   `yaml:"resetConsumeEndpointUrl"`
+	AllowResetConsume       bool     `yaml:"allowResetConsume"`
+	APIKeyEnv               string   `yaml:"apiKeyEnv"`
+	TokenEnv                string   `yaml:"tokenEnv"`
+	AccountIDEnv            string   `yaml:"accountIdEnv"`
+	AuthPath                string   `yaml:"authPath"`
+	UserAgent               string   `yaml:"userAgent"`
+	Budgets                 []Budget `yaml:"budgets"`
 }
 
 type Budget struct {
@@ -191,7 +198,7 @@ func Default() Config {
 		Server: ServerConfig{Host: "127.0.0.1", Port: 8787, ReadAuth: ReadAuth{Mode: "none"}, StatePath: "%STATE%/usagent/snapshot.json"},
 		Providers: ProvidersConfig{
 			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", BetaHeader: "oauth-2025-04-20"},
-			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
+			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
 			OpenAI:      OpenAIConfig{Enabled: false, APIKeyEnv: "OPENAI_ADMIN_KEY", BaseURL: "https://api.openai.com"},
 			ZAI:         ZAIConfig{Enabled: false, EndpointURL: "https://api.z.ai/api/monitor/usage/quota/limit", TokenEnv: "ZAI_API_KEY", TokenEnvFallbacks: []string{"GLM_API_KEY"}, AuthScheme: "bearer", AuthHeader: "Authorization", ExcludeLimitTypes: []string{"TIME_LIMIT"}},
 		},
@@ -319,6 +326,12 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.ChatGPT.EndpointURL == "" {
 		cfg.Providers.ChatGPT.EndpointURL = "https://chatgpt.com/backend-api/wham/usage"
 	}
+	if cfg.Providers.ChatGPT.ResetCreditsEndpointURL == "" {
+		cfg.Providers.ChatGPT.ResetCreditsEndpointURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+	}
+	if cfg.Providers.ChatGPT.ResetConsumeEndpointURL == "" {
+		cfg.Providers.ChatGPT.ResetConsumeEndpointURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+	}
 	if cfg.Providers.ChatGPT.TokenEnv == "" {
 		cfg.Providers.ChatGPT.TokenEnv = "CHATGPT_ACCESS_TOKEN"
 	}
@@ -331,7 +344,7 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.ChatGPT.RefreshMs <= 0 {
 		cfg.Providers.ChatGPT.RefreshMs = cfg.Quota.RefreshMs
 	}
-	cfg.Providers.ChatGPT.RefreshMs = max(cfg.Providers.ChatGPT.RefreshMs, int64((5*time.Minute)/time.Millisecond))
+	cfg.Providers.ChatGPT.RefreshMs = max(cfg.Providers.ChatGPT.RefreshMs, MinChatGPTRefreshMs)
 	if cfg.Providers.ChatGPT.StaleMs <= 0 {
 		cfg.Providers.ChatGPT.StaleMs = max(cfg.Providers.ChatGPT.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
@@ -342,6 +355,15 @@ func normalizeProviderDefaults(cfg Config) Config {
 		case "chatgpt":
 			if cfg.Providers.ChatGPT.EndpointURL == "" {
 				cfg.Providers.ChatGPT.EndpointURL = qp.EndpointURL
+			}
+			if cfg.Providers.ChatGPT.ResetCreditsEndpointURL == "" {
+				cfg.Providers.ChatGPT.ResetCreditsEndpointURL = qp.ResetCreditsEndpointURL
+			}
+			if cfg.Providers.ChatGPT.ResetConsumeEndpointURL == "" {
+				cfg.Providers.ChatGPT.ResetConsumeEndpointURL = qp.ResetConsumeEndpointURL
+			}
+			if qp.AllowResetConsume {
+				cfg.Providers.ChatGPT.AllowResetConsume = true
 			}
 			if cfg.Providers.ChatGPT.TokenEnv == "" {
 				cfg.Providers.ChatGPT.TokenEnv = qp.TokenEnv
