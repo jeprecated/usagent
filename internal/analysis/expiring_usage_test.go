@@ -110,6 +110,32 @@ func TestExpiringUsageInfersRollingSessionWindow(t *testing.T) {
 	}
 }
 
+func TestExpiringUsageIncludesAndFiltersMetadata(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	chat := quotaItem("chatgpt", "chatgpt-primary", "ChatGPT 5h", 20, 80, now.Add(time.Hour))
+	chat.ProviderTier = "high"
+	chat.ProviderTags = []string{"chat", "subscription"}
+	chat.ModelTier = "extra-high"
+	chat.ModelTags = []string{"codex"}
+	zai := quotaItem("z-ai", "z-ai-daily", "z.ai Daily", 20, 80, now.Add(time.Hour))
+	zai.ProviderTier = "medium"
+	zai.ProviderTags = []string{"api"}
+	usage := model.Usage{QuotaItems: []model.QuotaItem{chat, zai}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Tiers: map[string]bool{"extra-high": true}})
+	if len(res.Opportunities) != 1 || res.Opportunities[0].Provider != "chatgpt" || res.Opportunities[0].ModelTier != "extra-high" || res.Opportunities[0].ProviderTags[1] != "subscription" {
+		t.Fatalf("tier filtered response=%+v", res.Opportunities)
+	}
+	res = ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Tags: map[string]bool{"api": true}})
+	if len(res.Opportunities) != 1 || res.Opportunities[0].Provider != "z-ai" || res.Opportunities[0].ProviderTier != "medium" {
+		t.Fatalf("tag filtered response=%+v", res.Opportunities)
+	}
+	res = ExpiringUsage(usage, ExpiringUsageOptions{Now: now, Tiers: map[string]bool{"low": true}})
+	if len(res.Opportunities) != 0 {
+		t.Fatalf("expected tier filter to exclude all, got %+v", res.Opportunities)
+	}
+}
+
 func TestExpiringUsageFiltersProvidersAndResetCreditBankItems(t *testing.T) {
 	now := time.UnixMilli(1_000_000)
 	usage := model.Usage{QuotaItems: []model.QuotaItem{
@@ -141,6 +167,9 @@ func TestExpiringUsageFreshParentDownweightsShortWindowWaste(t *testing.T) {
 	}
 	if op.ActionableWasteAmount >= 40 || op.ActionableWasteAmount <= 0 {
 		t.Fatalf("fresh parent should substantially downweight actionable waste: %+v", op)
+	}
+	if op.OpportunityScore >= 0.2 || op.OpportunityScore <= 0 {
+		t.Fatalf("score should be based on actionable waste, not raw expiring unused: %+v", op)
 	}
 	if op.OverlapContext == nil || !op.OverlapContext.FreshParentFutureCapacityDownweighted || op.OverlapContext.ParentItemID != "chatgpt-secondary" {
 		t.Fatalf("missing fresh parent overlap context: %+v", op.OverlapContext)

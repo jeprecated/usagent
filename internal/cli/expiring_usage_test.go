@@ -22,14 +22,14 @@ func TestFetchExpiringUsageFromDaemonPassesQueryParams(t *testing.T) {
 			t.Fatalf("path=%s", r.URL.Path)
 		}
 		q := r.URL.Query()
-		if q.Get("within") != "24h0m0s" || q.Get("withinMs") != "60000" || q.Get("minimumRemainingPercent") != "25" || q.Get("providers") != "chatgpt,z-ai" || q.Get("includeLowConfidence") != "true" {
+		if q.Get("within") != "24h0m0s" || q.Get("withinMs") != "60000" || q.Get("minimumRemainingPercent") != "25" || q.Get("providers") != "chatgpt,z-ai" || q.Get("tiers") != "high,extra-high" || q.Get("tags") != "chat,codex" || q.Get("includeLowConfidence") != "true" {
 			t.Fatalf("query=%s", r.URL.RawQuery)
 		}
 		fmt.Fprint(w, `{"generatedAt":1,"opportunities":[{"provider":"chatgpt","itemId":"chatgpt-primary","label":"ChatGPT 5h","unit":"percent","remaining":80,"percentRemaining":80,"resetAt":3600000,"timeRemainingMs":3600000,"estimatedNaturalUseBeforeReset":5,"estimatedWastedAmount":75,"estimatedWastedPercent":75,"opportunityScore":0.6,"urgency":"extreme","confidence":"medium","reasons":[],"caveats":[]}]}`)
 	}))
 	defer srv.Close()
 	host, port := splitServer(t, srv.URL)
-	res, err := FetchExpiringUsageFromDaemon(context.Background(), testConfig(t, host, port), ExpiringUsageOptions{Timeout: time.Second, Within: 24 * time.Hour, WithinMS: 60000, MinimumRemainingPercent: 25, Providers: []string{"chatgpt", "z-ai"}, IncludeLowConfidence: true})
+	res, err := FetchExpiringUsageFromDaemon(context.Background(), testConfig(t, host, port), ExpiringUsageOptions{Timeout: time.Second, Within: 24 * time.Hour, WithinMS: 60000, MinimumRemainingPercent: 25, Providers: []string{"chatgpt", "z-ai"}, Tiers: []string{"high", "extra-high"}, Tags: []string{"chat", "codex"}, IncludeLowConfidence: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,10 +132,81 @@ quota:
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 	got := stdout.String()
-	for _, want := range []string{"mine/Alpha:", "80% remaining", "waste", "resets in", "urgency", "confidence medium"} {
+	for _, want := range []string{"Expiring usage", "URGENCY", "RESET", "mine / Alpha", "80%", "estimated unused", "CONF", "medium"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout=%q missing %q", got, want)
 		}
+	}
+}
+
+func TestFormatExpiringUsageDistinguishesActionableAndRaw(t *testing.T) {
+	res := analysis.ExpiringUsageResponse{Opportunities: []analysis.ExpiringUsageOpportunity{
+		{
+			Provider:                 "chatgpt",
+			ItemID:                   "chatgpt-primary",
+			Label:                    "ChatGPT 5h",
+			Unit:                     "percent",
+			Remaining:                80,
+			RawEstimatedWastedAmount: 75,
+			ActionableWasteAmount:    18.75,
+			ActionableWastePercent:   18.75,
+			TimeRemainingMs:          int64(time.Hour / time.Millisecond),
+			OpportunityScore:         0.1,
+			Urgency:                  "high",
+			Confidence:               "medium",
+			OverlapContext:           &analysis.ExpiringUsageOverlapContext{ParentItemID: "chatgpt-secondary"},
+		},
+	}}
+	got := FormatExpiringUsage(res)
+	for _, want := range []string{"PROVIDER / ITEM", "chatgpt / ChatGPT 5h", "actionable 18.75% (18.75%)", "75%"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("FormatExpiringUsage()=%q missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "estimated waste") {
+		t.Fatalf("CLI should not overclaim estimated waste: %q", got)
+	}
+}
+
+func TestFormatExpiringUsageFallbackUsesEstimatedUnused(t *testing.T) {
+	res := analysis.ExpiringUsageResponse{Opportunities: []analysis.ExpiringUsageOpportunity{
+		{
+			Provider:               "openai",
+			ItemID:                 "weekly",
+			Label:                  "Weekly",
+			Unit:                   "tokens",
+			Remaining:              1000,
+			EstimatedWastedAmount:  800,
+			EstimatedWastedPercent: 80,
+			ActionableWasteAmount:  800,
+			ActionableWastePercent: 80,
+			TimeRemainingMs:        int64(time.Hour / time.Millisecond),
+			OpportunityScore:       0.1,
+			Urgency:                "high",
+			Confidence:             "low",
+		},
+	}}
+	got := FormatExpiringUsage(res)
+	if !strings.Contains(got, "estimated unused 800 tokens (80%)") || strings.Contains(got, "estimated waste") {
+		t.Fatalf("unexpected fallback wording: %q", got)
+	}
+}
+
+func TestFormatExpiringUsageWithColor(t *testing.T) {
+	res := analysis.ExpiringUsageResponse{Opportunities: []analysis.ExpiringUsageOpportunity{{
+		Provider:         "chatgpt",
+		ItemID:           "chatgpt-primary",
+		Label:            "ChatGPT 5h",
+		Unit:             "percent",
+		Remaining:        40,
+		TimeRemainingMs:  int64(time.Hour / time.Millisecond),
+		OpportunityScore: 1,
+		Urgency:          "extreme",
+		Confidence:       "high",
+	}}}
+	got := FormatExpiringUsageWithColor(res, true)
+	if !strings.Contains(got, "\x1b[") || !strings.Contains(got, "EXTREME") {
+		t.Fatalf("expected ANSI-colored output, got %q", got)
 	}
 }
 

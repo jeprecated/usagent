@@ -24,3 +24,22 @@ Rename and extend expiring-usage outputs and CLI wording so users can tell the d
 ## Implementation Notes
 
 Best done after the history and overlapping-window tasks, because naming should reflect the final maths. Consider retaining `estimatedWastedAmount` as legacy raw or actionable value only with clear documentation.
+
+
+## Completion Summary
+
+- Agentleman launch failed due current Agentleman Pi-extension configuration, so completed this polish task directly in the parent workspace.
+- Updated CLI wording to distinguish actionable waste from raw expiring unused quota and avoid generic “estimated waste” overclaiming for low-context estimates.
+- Documented raw versus actionable expiring-usage fields and legacy `estimatedWasted*` compatibility semantics in README with a 5h plus weekly/monthly example.
+- Clarified overlap down-weighting reason text and added tests for actionable-score use, CLI formatting, and fallback estimated-unused wording.
+- Verified with `devenv shell go test ./...`.
+
+### Files Changed
+
+- README.md
+- internal/analysis/expiring_usage.go
+- internal/analysis/expiring_usage_test.go
+- internal/cli/expiring_usage.go
+- internal/cli/expiring_usage_test.go
+- .frontloop/usage-helper-apis/done/5000-expose-raw-versus-actionable-expiring-usage-estimates.md
+- .frontloop/usage-helper-apis/brief-raw-vs-actionable-expiring.md
