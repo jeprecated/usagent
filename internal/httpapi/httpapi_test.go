@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -68,6 +69,7 @@ func TestChatGPTResetCreditsEndpoints(t *testing.T) {
 	}))
 	defer provider.Close()
 	cfg := config.Default()
+	cfg.Server.StatePath = filepath.Join(t.TempDir(), "snapshot.json")
 	cfg.Providers.ChatGPT.Enabled = true
 	cfg.Providers.ChatGPT.TokenEnv = "CHATGPT_ACCESS_TOKEN"
 	cfg.Providers.ChatGPT.AccountIDEnv = "CHATGPT_ACCOUNT_ID"
