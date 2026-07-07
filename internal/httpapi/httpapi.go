@@ -25,6 +25,7 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", api.healthz)
 	mux.HandleFunc("GET /readyz", api.readyz)
 	mux.HandleFunc("GET /v1/usage", api.usage)
+	mux.HandleFunc("GET /v1/expiring-usage", api.expiringUsage)
 	mux.HandleFunc("GET /v1/providers", api.providers)
 	mux.HandleFunc("GET /v1/chatgpt/reset-credits", api.chatGPTResetCredits)
 	mux.HandleFunc("POST /v1/chatgpt/reset-credits/consume", api.consumeChatGPTResetCredit)

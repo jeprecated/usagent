@@ -37,11 +37,12 @@ usagent usage --offline  # skip daemon lookup and refresh/read locally
 - `GET /healthz`
 - `GET /readyz`
 - `GET /v1/usage`
+- `GET /v1/expiring-usage`
 - `GET /v1/providers`
 - `GET /v1/chatgpt/reset-credits`
 - `POST /v1/chatgpt/reset-credits/consume`
 
-`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling, and [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for ChatGPT/Codex reset banking details.
+`/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. `GET /v1/expiring-usage` is also cached-only: it derives likely "use it or lose it" quota opportunities from the current `/v1/usage` snapshot and supports `within`/`withinMs`, `minimumRemainingPercent`, `providers`, and `includeLowConfidence` query filters. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling, and [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for ChatGPT/Codex reset banking details.
 
 ## Config
 
