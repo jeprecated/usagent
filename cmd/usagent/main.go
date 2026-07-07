@@ -41,10 +41,16 @@ func runWithIO(args []string, stdout, stderr io.Writer) error {
 				return nil
 			}
 			return cli.RunUsage(context.Background(), args[1:], stdout, stderr)
+		case "expiring-usage", "expiring":
+			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
+				fmt.Fprint(stdout, "usagent expiring-usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s] [--within 24h] [--within-ms N] [--minimum-remaining-percent N] [--providers a,b,c] [--include-low-confidence]\n")
+				return nil
+			}
+			return cli.RunExpiringUsage(context.Background(), args[1:], stdout, stderr)
 		case "serve":
 			args = args[1:]
 		case "help", "-h", "--help":
-			fmt.Fprint(stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
+			fmt.Fprint(stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent expiring-usage [--config PATH] [--json] [--offline] [--within 24h] [--providers a,b,c]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
 			return nil
 		default:
 			return cli.RunUsage(context.Background(), args, stdout, stderr)

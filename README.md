@@ -11,6 +11,7 @@ devenv shell
 check                 # go test ./...
 start                 # go run ./cmd/usagent serve --config config.example.yaml
 usage                 # go run ./cmd/usagent usage --config config.example.yaml
+expiring              # go run ./cmd/usagent expiring-usage --config config.example.yaml --within 24h
 ```
 
 Without devenv:
@@ -19,6 +20,7 @@ Without devenv:
 go test ./...
 go run ./cmd/usagent serve --config config.example.yaml --host 127.0.0.1 --port 8787
 go run ./cmd/usagent usage --config config.example.yaml
+go run ./cmd/usagent expiring-usage --config config.example.yaml --within 24h
 ```
 
 ## CLI usage summary
@@ -30,6 +32,14 @@ usagent
 usagent usage --config ~/.config/usagent/config.yaml
 usagent usage --json
 usagent usage --offline  # skip daemon lookup and refresh/read locally
+```
+
+`usagent expiring-usage` (alias `usagent expiring`) prints likely "use it or lose it" opportunities from `/v1/expiring-usage`. Daemon-backed requests are cached-only; if the daemon is unavailable, the CLI falls back to the same local refresh/read path as `usage --offline`.
+
+```sh
+usagent expiring --within 24h --minimum-remaining-percent 10
+usagent expiring-usage --providers chatgpt,claude-code --include-low-confidence
+usagent expiring-usage --json
 ```
 
 ## Endpoints
