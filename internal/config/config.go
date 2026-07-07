@@ -167,6 +167,9 @@ type QuotaProvider struct {
 	EndpointURL            string   `yaml:"endpointUrl"`
 	APIKeyEnv              string   `yaml:"apiKeyEnv"`
 	TokenEnv               string   `yaml:"tokenEnv"`
+	AccountIDEnv           string   `yaml:"accountIdEnv"`
+	AuthPath               string   `yaml:"authPath"`
+	UserAgent              string   `yaml:"userAgent"`
 	Budgets                []Budget `yaml:"budgets"`
 }
 
@@ -336,6 +339,28 @@ func normalizeProviderDefaults(cfg Config) Config {
 	// Back-compat: migrate previous quota.providers OpenAI/z.ai settings into typed providers when present.
 	for _, qp := range cfg.Quota.Providers {
 		switch qp.ID {
+		case "chatgpt":
+			if cfg.Providers.ChatGPT.EndpointURL == "" {
+				cfg.Providers.ChatGPT.EndpointURL = qp.EndpointURL
+			}
+			if cfg.Providers.ChatGPT.TokenEnv == "" {
+				cfg.Providers.ChatGPT.TokenEnv = qp.TokenEnv
+			}
+			if cfg.Providers.ChatGPT.AccountIDEnv == "" {
+				cfg.Providers.ChatGPT.AccountIDEnv = qp.AccountIDEnv
+			}
+			if cfg.Providers.ChatGPT.AuthPath == "" {
+				cfg.Providers.ChatGPT.AuthPath = qp.AuthPath
+			}
+			if cfg.Providers.ChatGPT.UserAgent == "" {
+				cfg.Providers.ChatGPT.UserAgent = qp.UserAgent
+			}
+			if cfg.Providers.ChatGPT.RefreshMs <= 0 {
+				cfg.Providers.ChatGPT.RefreshMs = qp.RefreshMs
+			}
+			if cfg.Providers.ChatGPT.StaleMs <= 0 {
+				cfg.Providers.ChatGPT.StaleMs = qp.StaleMs
+			}
 		case "openai":
 			if cfg.Providers.OpenAI.APIKeyEnv == "" {
 				cfg.Providers.OpenAI.APIKeyEnv = qp.APIKeyEnv

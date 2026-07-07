@@ -95,7 +95,7 @@ providers:
 
 usageView:
   providers: ["claude-code", "chatgpt", "z-ai"]
-  windows: ["session", "weekly", "monthly", "fableWeekly", "extraCredits"]
+  windows: ["session", "weekly", "monthly", "fableWeekly", "extraCredits", "resetCredits"]
   percentMode: "remaining" # remaining | used
   labelStyle: "long" # long | short
   showResetMinutes: true
