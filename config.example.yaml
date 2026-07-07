@@ -12,8 +12,8 @@ providers:
     endpointUrl: "https://api.anthropic.com/api/oauth/usage"
     betaHeader: "oauth-2025-04-20"
     userAgent: "claude-code/2.0"
-    refreshMs: 300000
-    staleMs: 900000
+    refreshMs: 900000
+    staleMs: 2700000
 
   chatgpt:
     # ChatGPT Plus/Pro subscription quota via Codex/ChatGPT OAuth auth.

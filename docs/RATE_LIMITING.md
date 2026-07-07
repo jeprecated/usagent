@@ -10,6 +10,7 @@
 - Failed refreshes set `nextRefreshAt = max(now + refreshMs, upstream retry-after/reset delay)`.
 - This means a short or missing upstream retry header cannot create a tight retry loop.
 - The loop wakes once per second only to check the local snapshot; it does not call providers unless due.
+- Local/offline CLI fallback takes a shared refresh lock before calling providers so concurrent CLI invocations do not stampede upstream APIs when the daemon is unavailable.
 
 ## Built-in provider minimums
 
@@ -17,7 +18,7 @@ The built-in provider refresh intervals are clamped during config normalization:
 
 | Provider | Minimum refresh interval | Reason |
 | --- | ---: | --- |
-| Claude OAuth usage | 5 minutes | Anthropic documents 429 + `retry-after`; OAuth usage is also account-scoped and should not be polled per widget render. |
+| Claude OAuth usage | 15 minutes | The OAuth usage endpoint is account-scoped and has proven sensitive to polling bursts; local/offline fallback also uses a cross-process refresh lock. |
 | ChatGPT WHAM usage | 5 minutes | The ChatGPT/Codex usage endpoint is private and account-scoped; it should not be polled per widget render. |
 | OpenAI organization Costs | 10 minutes | The Costs API is an admin/organization endpoint for Platform/API spend and quota changes slowly; OpenAI recommends pacing requests and respecting retry headers. |
 | z.ai quota endpoint | 5 minutes | Public docs list 429 rate-limit/overload errors but no stable reset headers for the quota endpoint. |
@@ -43,7 +44,7 @@ When both request and token buckets are exhausted, the later reset wins.
 
 ### Claude OAuth usage
 
-Anthropic's API rate-limit documentation says 429 responses include `retry-after`, and Anthropic responses expose request/token remaining/reset headers. The Claude Code OAuth usage endpoint is not the normal Messages API, but it returns HTTP 429 in the same style, so `usagent` applies the Anthropic retry policy and the 5-minute minimum.
+Anthropic's API rate-limit documentation says 429 responses include `retry-after`, and Anthropic responses expose request/token remaining/reset headers. The Claude Code OAuth usage endpoint is not the normal Messages API, but it returns HTTP 429 in the same style, so `usagent` applies the Anthropic retry policy and a conservative 15-minute minimum.
 
 ### ChatGPT WHAM usage
 

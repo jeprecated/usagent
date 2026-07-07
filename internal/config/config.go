@@ -16,7 +16,7 @@ import (
 const DefaultStateBase = "~/.local/state"
 
 const (
-	MinClaudeOAuthRefreshMs = int64((5 * time.Minute) / time.Millisecond)
+	MinClaudeOAuthRefreshMs = int64((15 * time.Minute) / time.Millisecond)
 	MinChatGPTRefreshMs     = int64((5 * time.Minute) / time.Millisecond)
 	MinOpenAIRefreshMs      = int64((10 * time.Minute) / time.Millisecond)
 	MinZAIRefreshMs         = int64((5 * time.Minute) / time.Millisecond)

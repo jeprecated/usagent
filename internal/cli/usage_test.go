@@ -39,6 +39,24 @@ func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
 	}
 }
 
+func TestAcquireLocalRefreshLockReturnsUnlockedWhenBusy(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "snapshot.json")
+	unlock, locked, err := acquireLocalRefreshLock(context.Background(), statePath)
+	if err != nil || !locked {
+		t.Fatalf("first lock locked=%v err=%v", locked, err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, locked, err = acquireLocalRefreshLock(ctx, statePath)
+	if err != nil {
+		t.Fatalf("second lock err=%v", err)
+	}
+	if locked {
+		t.Fatal("second lock should not be acquired while first is held")
+	}
+}
+
 func TestFetchUsageFromDaemon(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/usage" {

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jmalloc/usagent/internal/app"
@@ -147,6 +148,23 @@ func LocalUsage(ctx context.Context, cfg config.Config, timeout time.Duration) (
 		return model.Usage{}, err
 	}
 	now := time.Now()
+	if !hasDueProvider(a, now) {
+		return a.Usage(now), nil
+	}
+	unlock, locked, err := acquireLocalRefreshLock(ctx, cfg.Server.StatePath)
+	if err != nil {
+		return model.Usage{}, err
+	}
+	if !locked {
+		return a.Usage(time.Now()), nil
+	}
+	defer unlock()
+	// Another local process may have refreshed while this process waited for the
+	// lock. Reload before deciding which providers are still due.
+	if err := a.LoadState(); err != nil {
+		return model.Usage{}, err
+	}
+	now = time.Now()
 	for _, p := range a.Providers {
 		if ctx.Err() != nil {
 			return model.Usage{}, ctx.Err()
@@ -156,6 +174,48 @@ func LocalUsage(ctx context.Context, cfg config.Config, timeout time.Duration) (
 		}
 	}
 	return a.Usage(time.Now()), nil
+}
+
+func hasDueProvider(a *app.App, now time.Time) bool {
+	for _, p := range a.Providers {
+		if a.Store.NeedsRefresh(p.ID(), now) {
+			return true
+		}
+	}
+	return false
+}
+
+func acquireLocalRefreshLock(ctx context.Context, statePath string) (func(), bool, error) {
+	if statePath == "" {
+		return func() {}, true, nil
+	}
+	lockPath := statePath + ".refresh.lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, false, err
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, false, err
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				_ = f.Close()
+			}, true, nil
+		}
+		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+			_ = f.Close()
+			return nil, false, err
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return func() {}, false, nil
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func FormatUsage(usage model.Usage) string {
