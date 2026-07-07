@@ -15,8 +15,20 @@ providers:
     refreshMs: 300000
     staleMs: 900000
 
+  chatgpt:
+    # ChatGPT Plus/Pro subscription quota via Codex/ChatGPT OAuth auth.
+    enabled: false
+    authPath: "~/.codex/auth.json"
+    endpointUrl: "https://chatgpt.com/backend-api/wham/usage"
+    tokenEnv: "CHATGPT_ACCESS_TOKEN"
+    accountIdEnv: "CHATGPT_ACCOUNT_ID"
+    userAgent: "usagent/0.1"
+    refreshMs: 300000
+    staleMs: 900000
+
   openai:
-    # Set enabled true only when OPENAI_ADMIN_KEY is available at runtime.
+    # OpenAI Platform/API cost budget, not ChatGPT Plus/Pro subscription usage.
+    # Set enabled true only when OPENAI_ADMIN_KEY is available at runtime and you want API spend budgets.
     enabled: false
     baseUrl: "https://api.openai.com"
     # costsEndpoint can override baseUrl + /v1/organization/costs for local fakes/proxies.
@@ -82,7 +94,7 @@ providers:
             visible: true
 
 usageView:
-  providers: ["claude-code", "openai", "z-ai"]
+  providers: ["claude-code", "chatgpt", "z-ai"]
   windows: ["session", "weekly", "monthly", "fableWeekly", "extraCredits"]
   percentMode: "remaining" # remaining | used
   labelStyle: "long" # long | short

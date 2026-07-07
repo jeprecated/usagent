@@ -18,8 +18,11 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" {
 		t.Fatal("missing claude endpoint/user-agent")
 	}
-	if got := cfg.UsageView.Providers; len(got) != 3 || got[0] != "claude-code" {
+	if got := cfg.UsageView.Providers; len(got) != 3 || got[0] != "claude-code" || got[1] != "chatgpt" {
 		t.Fatalf("providers=%v", got)
+	}
+	if cfg.Providers.ChatGPT.AuthPath == "" || cfg.Providers.ChatGPT.EndpointURL == "" || cfg.Providers.ChatGPT.TokenEnv != "CHATGPT_ACCESS_TOKEN" {
+		t.Fatalf("chatgpt=%+v", cfg.Providers.ChatGPT)
 	}
 	if cfg.Providers.OpenAI.APIKeyEnv != "OPENAI_ADMIN_KEY" || len(cfg.Providers.OpenAI.Budgets) != 2 {
 		t.Fatalf("openai=%+v", cfg.Providers.OpenAI)

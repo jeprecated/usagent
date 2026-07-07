@@ -41,6 +41,7 @@ type ReadAuth struct {
 
 type ProvidersConfig struct {
 	ClaudeOAuth ClaudeOAuthConfig      `yaml:"claudeOAuth"`
+	ChatGPT     ChatGPTConfig          `yaml:"chatgpt"`
 	OpenAI      OpenAIConfig           `yaml:"openai"`
 	ZAI         ZAIConfig              `yaml:"zAi"`
 	Custom      []CustomProviderConfig `yaml:"custom"`
@@ -54,6 +55,17 @@ type ClaudeOAuthConfig struct {
 	UserAgent       string `yaml:"userAgent"`
 	RefreshMs       int64  `yaml:"refreshMs"`
 	StaleMs         int64  `yaml:"staleMs"`
+}
+
+type ChatGPTConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	AuthPath     string `yaml:"authPath"`
+	EndpointURL  string `yaml:"endpointUrl"`
+	TokenEnv     string `yaml:"tokenEnv"`
+	AccountIDEnv string `yaml:"accountIdEnv"`
+	UserAgent    string `yaml:"userAgent"`
+	RefreshMs    int64  `yaml:"refreshMs"`
+	StaleMs      int64  `yaml:"staleMs"`
 }
 
 type OpenAIConfig struct {
@@ -176,10 +188,11 @@ func Default() Config {
 		Server: ServerConfig{Host: "127.0.0.1", Port: 8787, ReadAuth: ReadAuth{Mode: "none"}, StatePath: "%STATE%/usagent/snapshot.json"},
 		Providers: ProvidersConfig{
 			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", BetaHeader: "oauth-2025-04-20"},
+			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
 			OpenAI:      OpenAIConfig{Enabled: false, APIKeyEnv: "OPENAI_ADMIN_KEY", BaseURL: "https://api.openai.com"},
 			ZAI:         ZAIConfig{Enabled: false, EndpointURL: "https://api.z.ai/api/monitor/usage/quota/limit", TokenEnv: "ZAI_API_KEY", TokenEnvFallbacks: []string{"GLM_API_KEY"}, AuthScheme: "bearer", AuthHeader: "Authorization", ExcludeLimitTypes: []string{"TIME_LIMIT"}},
 		},
-		UsageView: UsageViewConfig{Providers: []string{"claude-code", "openai", "z-ai"}},
+		UsageView: UsageViewConfig{Providers: []string{"claude-code", "chatgpt", "z-ai"}},
 		Quota:     QuotaConfig{RefreshMs: int64((5 * time.Minute) / time.Millisecond)},
 	}
 }
@@ -251,7 +264,7 @@ func Normalize(cfg Config) (Config, error) {
 		return cfg, errors.New("only readAuth.mode=none is supported")
 	}
 	if len(cfg.UsageView.Providers) == 0 {
-		cfg.UsageView.Providers = []string{"claude-code", "openai", "z-ai"}
+		cfg.UsageView.Providers = []string{"claude-code", "chatgpt", "z-ai"}
 	}
 	if cfg.Quota.RefreshMs <= 0 {
 		cfg.Quota.RefreshMs = int64((5 * time.Minute) / time.Millisecond)
@@ -266,6 +279,10 @@ func Normalize(cfg Config) (Config, error) {
 		return cfg, err
 	}
 	cfg.Providers.ClaudeOAuth.CredentialsPath, err = ExpandRuntimePath(cfg.Providers.ClaudeOAuth.CredentialsPath)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Providers.ChatGPT.AuthPath, err = ExpandRuntimePath(cfg.Providers.ChatGPT.AuthPath)
 	if err != nil {
 		return cfg, err
 	}
@@ -291,6 +308,29 @@ func normalizeProviderDefaults(cfg Config) Config {
 	cfg.Providers.ClaudeOAuth.RefreshMs = max(cfg.Providers.ClaudeOAuth.RefreshMs, MinClaudeOAuthRefreshMs)
 	if cfg.Providers.ClaudeOAuth.StaleMs <= 0 {
 		cfg.Providers.ClaudeOAuth.StaleMs = max(cfg.Providers.ClaudeOAuth.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
+	}
+
+	if cfg.Providers.ChatGPT.AuthPath == "" {
+		cfg.Providers.ChatGPT.AuthPath = "~/.codex/auth.json"
+	}
+	if cfg.Providers.ChatGPT.EndpointURL == "" {
+		cfg.Providers.ChatGPT.EndpointURL = "https://chatgpt.com/backend-api/wham/usage"
+	}
+	if cfg.Providers.ChatGPT.TokenEnv == "" {
+		cfg.Providers.ChatGPT.TokenEnv = "CHATGPT_ACCESS_TOKEN"
+	}
+	if cfg.Providers.ChatGPT.AccountIDEnv == "" {
+		cfg.Providers.ChatGPT.AccountIDEnv = "CHATGPT_ACCOUNT_ID"
+	}
+	if cfg.Providers.ChatGPT.UserAgent == "" {
+		cfg.Providers.ChatGPT.UserAgent = "usagent/0.1"
+	}
+	if cfg.Providers.ChatGPT.RefreshMs <= 0 {
+		cfg.Providers.ChatGPT.RefreshMs = cfg.Quota.RefreshMs
+	}
+	cfg.Providers.ChatGPT.RefreshMs = max(cfg.Providers.ChatGPT.RefreshMs, int64((5*time.Minute)/time.Millisecond))
+	if cfg.Providers.ChatGPT.StaleMs <= 0 {
+		cfg.Providers.ChatGPT.StaleMs = max(cfg.Providers.ChatGPT.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
 
 	// Back-compat: migrate previous quota.providers OpenAI/z.ai settings into typed providers when present.

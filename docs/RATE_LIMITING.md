@@ -18,7 +18,8 @@ The built-in provider refresh intervals are clamped during config normalization:
 | Provider | Minimum refresh interval | Reason |
 | --- | ---: | --- |
 | Claude OAuth usage | 5 minutes | Anthropic documents 429 + `retry-after`; OAuth usage is also account-scoped and should not be polled per widget render. |
-| OpenAI organization Costs | 10 minutes | The Costs API is an admin/organization endpoint and quota changes slowly; OpenAI recommends pacing requests and respecting retry headers. |
+| ChatGPT WHAM usage | 5 minutes | The ChatGPT/Codex usage endpoint is private and account-scoped; it should not be polled per widget render. |
+| OpenAI organization Costs | 10 minutes | The Costs API is an admin/organization endpoint for Platform/API spend and quota changes slowly; OpenAI recommends pacing requests and respecting retry headers. |
 | z.ai quota endpoint | 5 minutes | Public docs list 429 rate-limit/overload errors but no stable reset headers for the quota endpoint. |
 
 Custom providers keep their configured interval because their rate-limit contract is provider-specific, but they still honor `Retry-After` / `Retry-After-Ms` and the no-tight-loop failure rule.
@@ -44,9 +45,13 @@ When both request and token buckets are exhausted, the later reset wins.
 
 Anthropic's API rate-limit documentation says 429 responses include `retry-after`, and Anthropic responses expose request/token remaining/reset headers. The Claude Code OAuth usage endpoint is not the normal Messages API, but it returns HTTP 429 in the same style, so `usagent` applies the Anthropic retry policy and the 5-minute minimum.
 
+### ChatGPT WHAM usage
+
+ChatGPT Pro/Codex quota is read from an undocumented ChatGPT web endpoint using OAuth credentials from the Codex/ChatGPT login. `usagent` respects retry headers and otherwise waits at least the configured refresh interval. The default/minimum ChatGPT refresh is 5 minutes.
+
 ### OpenAI Costs
 
-OpenAI documents 429 rate-limit errors and recommends pacing requests, avoiding unnecessary calls, and respecting response headers. The Costs endpoint is queried once per configured budget window, so the default weekly+monthly setup makes two requests per refresh. The default/minimum OpenAI refresh is 10 minutes.
+OpenAI documents 429 rate-limit errors and recommends pacing requests, avoiding unnecessary calls, and respecting response headers. The Costs endpoint is queried once per refresh for the widest configured budget range, then weekly/monthly budget rows are derived locally. The default/minimum OpenAI API-cost refresh is 10 minutes.
 
 ### z.ai quota
 

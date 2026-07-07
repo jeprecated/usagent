@@ -65,6 +65,7 @@ func TestUsageDoesNotFetchProvidersForHTTPCallers(t *testing.T) {
 func TestNewWiresEnabledProvidersAndCustomMetadata(t *testing.T) {
 	cfg := config.Default()
 	cfg.Server.StatePath = ""
+	cfg.Providers.ChatGPT.Enabled = true
 	cfg.Providers.OpenAI.Enabled = true
 	cfg.Providers.OpenAI.Budgets = []config.Budget{{ID: "weekly-usd", Unit: "usd", Limit: 10}}
 	cfg.Providers.ZAI.Enabled = true
@@ -74,7 +75,7 @@ func TestNewWiresEnabledProvidersAndCustomMetadata(t *testing.T) {
 	for _, p := range a.Providers {
 		ids[p.ID()] = true
 	}
-	for _, want := range []string{"openai", "z-ai", "mine"} {
+	for _, want := range []string{"chatgpt", "openai", "z-ai", "mine"} {
 		if !ids[want] {
 			t.Fatalf("provider %s not wired; ids=%v", want, ids)
 		}

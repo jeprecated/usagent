@@ -10,6 +10,7 @@ import (
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/model"
 	"github.com/jmalloc/usagent/internal/providers"
+	"github.com/jmalloc/usagent/internal/providers/chatgpt"
 	"github.com/jmalloc/usagent/internal/providers/claude"
 	"github.com/jmalloc/usagent/internal/providers/custom"
 	"github.com/jmalloc/usagent/internal/providers/noop"
@@ -42,6 +43,12 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		p := claude.New(cfg.Providers.ClaudeOAuth)
 		ps = append(ps, p)
 		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.ClaudeOAuth.RefreshMs, StaleMs: cfg.Providers.ClaudeOAuth.StaleMs}
+		active[p.ID()] = true
+	}
+	if cfg.Providers.ChatGPT.Enabled {
+		p := chatgpt.New(cfg.Providers.ChatGPT)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.ChatGPT.RefreshMs, StaleMs: cfg.Providers.ChatGPT.StaleMs}
 		active[p.ID()] = true
 	}
 	if cfg.Providers.OpenAI.Enabled {
@@ -87,8 +94,10 @@ func LabelFor(id string) string {
 	switch id {
 	case "claude-code":
 		return "Claude"
+	case "chatgpt":
+		return "ChatGPT Pro"
 	case "openai":
-		return "OpenAI"
+		return "OpenAI API"
 	case "z-ai":
 		return "z.ai"
 	default:
@@ -97,7 +106,7 @@ func LabelFor(id string) string {
 }
 
 func labelsFor(cfg config.Config) map[string]string {
-	labels := map[string]string{"claude-code": "Claude", "openai": "OpenAI", "z-ai": "z.ai"}
+	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "z-ai": "z.ai"}
 	for _, cp := range cfg.Providers.Custom {
 		if cp.Label != "" {
 			labels[cp.ID] = cp.Label

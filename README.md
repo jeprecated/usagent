@@ -2,7 +2,7 @@
 
 Standalone Go usage/quota microservice for agent providers.
 
-`usagent` refreshes provider usage for Claude Code/Fable, OpenAI, and z.ai through a cache coordinator, normalizes the current snapshot to schema version 2, and exposes it over HTTP for Noctalia or any other client.
+`usagent` refreshes provider usage for Claude Code/Fable, ChatGPT Pro/Codex, optional OpenAI API costs, and z.ai through a cache coordinator, normalizes the current snapshot to schema version 2, and exposes it over HTTP for Noctalia or any other client.
 
 ## Commands
 
@@ -51,7 +51,9 @@ Secrets must be provided by runtime environment variables or secret files. Do no
 
 Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses. When the endpoint includes `extra_usage`, usagent exposes enabled Extra Credits as a monthly currency quota item, converting the API's cent values to dollars/euros/etc.
 
-OpenAI usage is fetched from the Admin Costs API when `providers.openai.enabled=true`. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
+ChatGPT Pro/Codex subscription usage is fetched from ChatGPT's private `/backend-api/wham/usage` endpoint when `providers.chatgpt.enabled=true`. By default usagent reads the Codex CLI OAuth login from `~/.codex/auth.json`; alternatively set `CHATGPT_ACCESS_TOKEN` and optionally `CHATGPT_ACCOUNT_ID`.
+
+OpenAI API spend is separate and optional. It is fetched from the Admin Costs API when `providers.openai.enabled=true`. This does **not** track ChatGPT Plus/Pro subscription quota. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
 
 ```yaml
 providers:
@@ -104,7 +106,7 @@ providers:
             percentUsed: "percentUsed"
             visible: true
 usageView:
-  providers: ["claude-code", "openai", "z-ai", "my-provider"]
+  providers: ["claude-code", "chatgpt", "z-ai", "my-provider"]
 ```
 
 ## Docker
@@ -180,7 +182,7 @@ The generated YAML lives in the Nix store and must not contain plaintext secrets
 ## Target bar UI
 
 ```text
-Usage: Claude S:100% W:50% F:24% [2h14m] · OpenAI W:50% M:70% · z.ai S:90% W:97%
+Usage: Claude S:100% W:50% F:24% [2h14m] · ChatGPT S:75% W:40% · z.ai S:90% W:97%
 ```
 
-OpenAI, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.
+ChatGPT, OpenAI API costs, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.

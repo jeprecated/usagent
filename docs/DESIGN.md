@@ -8,6 +8,7 @@
 
 ```text
 Claude Code OAuth usage API ──refresh loop───────────────┐
+ChatGPT WHAM usage API ─────refresh loop──────────────────┤
 OpenAI Admin Costs API ────refresh loop──────────────────┤
 z.ai quota API ────────────refresh loop──────────────────┤
 Custom HTTP JSON APIs ─────refresh loop──────────────────┤
@@ -29,7 +30,8 @@ Package layout:
 - `internal/cache` owns current provider snapshots, stale/error metadata, and atomic disk persistence.
 - `internal/providers` defines the provider interface.
 - `internal/providers/claude` implements Claude Code OAuth fetching and normalization.
-- `internal/providers/openai` implements OpenAI Admin Costs API fetching and budget normalization.
+- `internal/providers/chatgpt` implements ChatGPT Pro/Codex WHAM usage fetching and normalization.
+- `internal/providers/openai` implements optional OpenAI Platform Admin Costs API fetching and budget normalization.
 - `internal/providers/zai` implements z.ai quota fetching and normalization.
 - `internal/providers/custom` implements deterministic HTTP JSON mapping for user-defined providers.
 - `internal/providers/noop` keeps disabled provider metadata stable when requested by `usageView.providers`.
@@ -60,16 +62,28 @@ Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks ar
 
 If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 
-### OpenAI
+### ChatGPT Pro / Codex
 
-OpenAI is polled from the Admin Costs API when `providers.openai.enabled=true`:
+ChatGPT subscription usage is polled from the private ChatGPT/Codex WHAM endpoint when `providers.chatgpt.enabled=true`:
+
+```text
+GET https://chatgpt.com/backend-api/wham/usage
+Authorization: Bearer <Codex/ChatGPT OAuth access token>
+ChatGPT-Account-Id: <account id when available>
+```
+
+By default usagent reads `tokens.access_token` and `tokens.account_id` from `~/.codex/auth.json`, written by the Codex CLI ChatGPT login. `CHATGPT_ACCESS_TOKEN` and `CHATGPT_ACCOUNT_ID` can override the file. The provider normalizes `rate_limit.primary_window` as the session/5h row, `rate_limit.secondary_window` as the weekly row, any `additional_rate_limits[]` windows as model-specific rows, and `rate_limit_reset_credits.available_count` as a reset-credit count. Tokens are never exposed in responses.
+
+### OpenAI API costs
+
+OpenAI Platform API spend is polled from the Admin Costs API when `providers.openai.enabled=true`. This is not ChatGPT Plus/Pro subscription quota:
 
 ```text
 GET https://api.openai.com/v1/organization/costs?start_time=<unix>&end_time=<unix>&bucket_width=1d
 Authorization: Bearer <runtime OPENAI_ADMIN_KEY>
 ```
 
-Each configured budget produces one quota item. The provider requests the matching weekly/monthly window, follows `next_page` pagination with a hard page limit, sums `amount.value` buckets matching the budget currency, and reports `used`, `remaining`, and `percentUsed` against the configured budget limit. Non-2xx responses honor `Retry-After` and are handled by stale-if-error cache behavior.
+Each configured budget produces one quota item. The provider requests the widest configured range once, follows `next_page` pagination with the `page` cursor and explicit `limit`, sums `amount.value` buckets matching the budget currency/window, and reports `used`, `remaining`, and `percentUsed` against the configured budget limit. Non-2xx responses honor `Retry-After` and are handled by stale-if-error cache behavior.
 
 ### z.ai
 
