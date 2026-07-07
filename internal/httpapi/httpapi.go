@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jmalloc/usagent/internal/analysis"
 	"github.com/jmalloc/usagent/internal/app"
 	"github.com/jmalloc/usagent/internal/model"
 )
@@ -25,6 +26,7 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", api.healthz)
 	mux.HandleFunc("GET /readyz", api.readyz)
 	mux.HandleFunc("GET /v1/usage", api.usage)
+	mux.HandleFunc("GET /v1/usage/analysis", api.usageAnalysis)
 	mux.HandleFunc("GET /v1/expiring-usage", api.expiringUsage)
 	mux.HandleFunc("GET /v1/providers", api.providers)
 	mux.HandleFunc("GET /v1/chatgpt/reset-credits", api.chatGPTResetCredits)
@@ -41,6 +43,11 @@ func (api API) readyz(w http.ResponseWriter, r *http.Request) {
 }
 func (api API) usage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.App.Usage(time.Now()))
+}
+func (api API) usageAnalysis(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	usage := api.App.Usage(now)
+	writeJSON(w, http.StatusOK, analysis.AnalyzeUsage(usage, analysis.UsageAnalysisOptions{Now: now}))
 }
 func (api API) providers(w http.ResponseWriter, r *http.Request) {
 	u := api.App.Usage(time.Now())

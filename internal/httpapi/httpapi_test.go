@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/jmalloc/usagent/internal/app"
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jmalloc/usagent/internal/providers"
 )
 
 func TestHTTPContract(t *testing.T) {
@@ -22,7 +25,7 @@ func TestHTTPContract(t *testing.T) {
 	a := app.New(cfg, nil)
 	a.Store.UpsertSuccess("claude-code", "Claude", []model.QuotaItem{{ID: "claude-code-oauth-session", Provider: "claude-code", Label: "Claude 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling"}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, Visible: true}}, time.UnixMilli(1000), 1000, 2000)
 	h := New(a, "config.example.yaml")
-	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/expiring-usage", "/v1/providers"} {
+	for _, path := range []string{"/healthz", "/readyz", "/v1/usage", "/v1/usage/analysis", "/v1/expiring-usage", "/v1/providers"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -94,6 +97,49 @@ func TestExpiringUsageEndpointUsesCachedUsageAndQueryFilters(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/expiring-usage?includeLowConfidence=not-bool", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad query status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+type countingProvider struct {
+	id    string
+	count int32
+}
+
+func (p *countingProvider) ID() string    { return p.id }
+func (p *countingProvider) Label() string { return p.id }
+func (p *countingProvider) Fetch(context.Context, time.Time) (providers.Result, error) {
+	atomic.AddInt32(&p.count, 1)
+	return providers.Result{}, nil
+}
+
+func TestUsageAnalysisEndpointUsesCachedUsageOnly(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.StatePath = ""
+	cfg.UsageView.Providers = []string{"fake"}
+	a := app.New(cfg, nil)
+	provider := &countingProvider{id: "fake"}
+	a.Providers = []providers.Provider{provider}
+	now := time.Now()
+	resetAt := now.Add(time.Hour).UnixMilli()
+	a.Store.UpsertSuccess("fake", "Fake", []model.QuotaItem{{ID: "fake-session", Provider: "fake", Label: "Fake 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &resetAt}, Unit: "percent", Limit: 100, Used: 20, Remaining: 80, PercentUsed: 20, Visible: true, Reset: &model.Reset{ResetAt: resetAt, ResetWindowID: "session", Source: "provider"}}}, now, int64(time.Hour/time.Millisecond), int64((2*time.Hour)/time.Millisecond))
+	h := New(a, "config.example.yaml")
+
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/usage/analysis", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var res analysis.UsageAnalysisResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Items) != 1 || res.Items[0].ItemID != "fake-session" || res.Items[0].PercentRemaining != 80 {
+			t.Fatalf("analysis response=%+v", res)
+		}
+	}
+	if got := atomic.LoadInt32(&provider.count); got != 0 {
+		t.Fatalf("usage analysis triggered provider fetch count=%d", got)
 	}
 }
 

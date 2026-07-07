@@ -28,6 +28,7 @@ Package layout:
 - `internal/config` parses YAML, flags, env overrides, validation, `~`, and `%STATE%` expansion.
 - `internal/model` owns the schema v2 response structs.
 - `internal/cache` owns current provider snapshots, stale/error metadata, and atomic disk persistence.
+- `internal/analysis` derives cached-only helper views such as usage analysis and expiring-usage opportunities from `model.Usage` snapshots.
 - `internal/providers` defines the provider interface.
 - `internal/providers/claude` implements Claude Code OAuth fetching and normalization.
 - `internal/providers/chatgpt` implements ChatGPT Pro/Codex WHAM usage fetching and normalization.
@@ -146,6 +147,8 @@ HTTP callers never synchronously call provider APIs. The refresh loop checks pro
 ```
 
 `GET /v1/providers` returns `{ "providers": [...] }` using the same provider objects.
+
+`GET /v1/usage/analysis` is a cached-only helper endpoint over `api.App.Usage(time.Now())`. It never calls provider APIs; it derives per-item percent remaining, reset and time remaining, inferred fixed/rolling window duration and start when possible, elapsed/time-remaining ratios, average pace, pressure to exhaust remaining quota by reset, projected exhaustion, confidence, and caveats.
 
 ## Storage
 
