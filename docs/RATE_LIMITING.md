@@ -47,7 +47,7 @@ Anthropic's API rate-limit documentation says 429 responses include `retry-after
 
 ### ChatGPT WHAM usage
 
-ChatGPT Pro/Codex quota is read from an undocumented ChatGPT web endpoint using OAuth credentials from the Codex/ChatGPT login. `usagent` respects retry headers and otherwise waits at least the configured refresh interval. The default/minimum ChatGPT refresh is 5 minutes.
+ChatGPT Pro/Codex quota is read from undocumented ChatGPT web endpoints using OAuth credentials from the Codex/ChatGPT login. `usagent` respects retry headers and otherwise waits at least the configured refresh interval. The default/minimum ChatGPT refresh is 5 minutes. Reset-credit listing/consumption is documented in [`CHATGPT_RESET_CREDITS.md`](CHATGPT_RESET_CREDITS.md); consumption is mutating, explicitly triggered, and not part of the refresh loop.
 
 ### OpenAI Costs
 
