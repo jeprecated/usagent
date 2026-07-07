@@ -32,6 +32,50 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	}
 }
 
+func TestLoadParsesProviderAndModelMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := `server: {host: "127.0.0.1", port: 8787, readAuth: {mode: "none"}}
+providers:
+  chatgpt:
+    metadata:
+      tier: "high"
+      tags: ["chat", "subscription", "chat"]
+      models:
+        chatgpt-primary:
+          tier: "extra-high"
+          tags: ["codex", "fast"]
+  custom:
+    - id: "mine"
+      label: "Mine"
+      enabled: true
+      metadata:
+        tier: "medium"
+        tags: ["local", "custom"]
+usageView: {providers: [chatgpt, mine, unknown]}
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Providers.ChatGPT.Metadata.Tier != "high" || len(cfg.Providers.ChatGPT.Metadata.Tags) != 2 {
+		t.Fatalf("chatgpt metadata=%+v", cfg.Providers.ChatGPT.Metadata)
+	}
+	modelMetadata := cfg.Providers.ChatGPT.Metadata.Models["chatgpt-primary"]
+	if modelMetadata.Tier != "extra-high" || len(modelMetadata.Tags) != 2 || modelMetadata.Tags[0] != "codex" {
+		t.Fatalf("model metadata=%+v", modelMetadata)
+	}
+	if cfg.Providers.Custom[0].Metadata.Tier != "medium" || cfg.Providers.Custom[0].Metadata.Tags[1] != "custom" {
+		t.Fatalf("custom metadata=%+v", cfg.Providers.Custom[0].Metadata)
+	}
+	if cfg.Providers.ClaudeOAuth.Metadata.Tier != "" || len(cfg.Providers.ClaudeOAuth.Metadata.Tags) != 0 {
+		t.Fatalf("defaults should not hard-code metadata: %+v", cfg.Providers.ClaudeOAuth.Metadata)
+	}
+}
+
 func TestLoadParsesCustomProviderMapping(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

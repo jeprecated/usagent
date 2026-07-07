@@ -21,6 +21,8 @@ type ExpiringUsageOptions struct {
 	Within                  time.Duration
 	MinimumRemainingPercent float64
 	Providers               map[string]bool
+	Tiers                   map[string]bool
+	Tags                    map[string]bool
 	IncludeLowConfidence    bool
 	BurnRates               map[string]BurnRateEstimate
 }
@@ -51,6 +53,8 @@ type ExpiringUsageOpportunity struct {
 	PercentRemaining               float64                      `json:"percentRemaining"`
 	ProviderTier                   string                       `json:"providerTier,omitempty"`
 	ProviderTags                   []string                     `json:"providerTags,omitempty"`
+	ModelTier                      string                       `json:"modelTier,omitempty"`
+	ModelTags                      []string                     `json:"modelTags,omitempty"`
 	ResetAt                        int64                        `json:"resetAt"`
 	TimeRemainingMs                int64                        `json:"timeRemainingMs"`
 	EstimatedNaturalUseBeforeReset float64                      `json:"estimatedNaturalUseBeforeReset"`
@@ -147,6 +151,12 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 	if len(opts.Providers) > 0 && !opts.Providers[item.Provider] {
 		return expiringCandidate{}, false
 	}
+	if len(opts.Tiers) > 0 && !matchesTier(item, opts.Tiers) {
+		return expiringCandidate{}, false
+	}
+	if len(opts.Tags) > 0 && !matchesTags(item, opts.Tags) {
+		return expiringCandidate{}, false
+	}
 	percentRemaining := percentRemaining(item)
 	if percentRemaining <= 0 || percentRemaining < opts.MinimumRemainingPercent {
 		return expiringCandidate{}, false
@@ -224,6 +234,10 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 		Unit:                           unit,
 		Remaining:                      round3(item.Remaining),
 		PercentRemaining:               round3(percentRemaining),
+		ProviderTier:                   item.ProviderTier,
+		ProviderTags:                   cloneStrings(item.ProviderTags),
+		ModelTier:                      item.ModelTier,
+		ModelTags:                      cloneStrings(item.ModelTags),
 		ResetAt:                        info.resetAt,
 		TimeRemainingMs:                info.timeRemaining.Milliseconds(),
 		EstimatedNaturalUseBeforeReset: round3(natural),
@@ -344,7 +358,7 @@ func applyOverlapAdjustments(candidate *expiringCandidate, infos []quotaWindowIn
 	if freshParent && futureCanSatisfyDemand {
 		actionable *= 0.25
 		ctx.FreshParentFutureCapacityDownweighted = true
-		candidate.op.Reasons = append(candidate.op.Reasons, "fresh parent window and future short-window resets can likely satisfy forecast demand, so current short-window waste is down-weighted")
+		candidate.op.Reasons = append(candidate.op.Reasons, "fresh parent window and future short-window resets can likely satisfy forecast demand, so raw expiring unused is down-weighted for actionable waste")
 	}
 
 	if parentNearReset || parentConstrained {
@@ -542,6 +556,33 @@ func windowDescription(item model.QuotaItem) string {
 		return item.Window.ID
 	}
 	return "parent"
+}
+
+func matchesTier(item model.QuotaItem, tiers map[string]bool) bool {
+	return tiers[strings.ToLower(item.ProviderTier)] || tiers[strings.ToLower(item.ModelTier)]
+}
+
+func matchesTags(item model.QuotaItem, tags map[string]bool) bool {
+	for _, tag := range item.ProviderTags {
+		if tags[strings.ToLower(tag)] {
+			return true
+		}
+	}
+	for _, tag := range item.ModelTags {
+		if tags[strings.ToLower(tag)] {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }
 
 func resetAtMs(item model.QuotaItem) (int64, bool) {

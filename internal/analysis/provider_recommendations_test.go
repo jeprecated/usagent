@@ -148,6 +148,48 @@ func TestRecommendProviderFiltersProviderMinimumRemainingAndUnit(t *testing.T) {
 	}
 }
 
+func TestRecommendProviderFiltersProviderAndModelTierTags(t *testing.T) {
+	now := time.UnixMilli(6_000_000)
+	chat := quotaItemWithWindow("chatgpt", "chatgpt-primary", "ChatGPT 5h", "session", "S", "rolling", 10, 90, now.Add(time.Hour))
+	chat.ProviderTier = "high"
+	chat.ProviderTags = []string{"chat", "subscription"}
+	chat.ModelTier = "extra-high"
+	chat.ModelTags = []string{"codex"}
+	claude := quotaItemWithWindow("claude-code", "claude-code-oauth-session", "Claude 5h", "session", "S", "rolling", 20, 80, now.Add(time.Hour))
+	claude.ModelTier = "high"
+	zai := quotaItemWithWindow("z-ai", "z-ai-daily", "z.ai daily", "daily", "D", "daily", 5, 95, now.Add(time.Hour))
+	zai.ProviderTier = "medium"
+	zai.ProviderTags = []string{"api"}
+	usage := model.Usage{
+		Providers: []model.Provider{
+			{ID: "chatgpt", Label: "ChatGPT", State: model.ProviderStateFresh, Tier: "high", Tags: []string{"chat", "subscription"}},
+			{ID: "claude-code", Label: "Claude", State: model.ProviderStateFresh, Tier: "high", Tags: []string{"code"}},
+			{ID: "z-ai", Label: "z.ai", State: model.ProviderStateFresh, Tier: "medium", Tags: []string{"api"}},
+		},
+		QuotaItems: []model.QuotaItem{chat, claude, zai},
+	}
+
+	res := RecommendProvider(usage, ProviderRecommendationOptions{Now: now, Tiers: map[string]bool{"extra-high": true}})
+	if len(res.RankedCandidates) != 1 || res.SelectedProvider != "chatgpt" || res.RankedCandidates[0].ConstrainingItem.ItemID != "chatgpt-primary" {
+		t.Fatalf("model tier filter response=%+v", res)
+	}
+
+	res = RecommendProvider(usage, ProviderRecommendationOptions{Now: now, Tags: map[string]bool{"api": true}})
+	if len(res.RankedCandidates) != 1 || res.SelectedProvider != "z-ai" {
+		t.Fatalf("provider tag filter response=%+v", res)
+	}
+
+	res = RecommendProvider(usage, ProviderRecommendationOptions{Now: now, Tiers: map[string]bool{"high": true}, Tags: map[string]bool{"code": true}})
+	if len(res.RankedCandidates) != 1 || res.SelectedProvider != "claude-code" {
+		t.Fatalf("combined provider/model metadata filter response=%+v", res)
+	}
+
+	res = RecommendProvider(usage, ProviderRecommendationOptions{Now: now, Tags: map[string]bool{"missing": true}})
+	if len(res.RankedCandidates) != 0 || res.SelectedProvider != "" {
+		t.Fatalf("missing tag should exclude all candidates: %+v", res)
+	}
+}
+
 func recommendationCandidatesByProvider(candidates []ProviderRecommendationCandidate) map[string]ProviderRecommendationCandidate {
 	out := map[string]ProviderRecommendationCandidate{}
 	for _, candidate := range candidates {

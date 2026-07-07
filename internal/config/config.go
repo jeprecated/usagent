@@ -48,54 +48,69 @@ type ProvidersConfig struct {
 	Custom      []CustomProviderConfig `yaml:"custom"`
 }
 
+type MetadataConfig struct {
+	Tier string   `yaml:"tier"`
+	Tags []string `yaml:"tags"`
+}
+
+type ProviderMetadataConfig struct {
+	Tier   string                    `yaml:"tier"`
+	Tags   []string                  `yaml:"tags"`
+	Models map[string]MetadataConfig `yaml:"models"`
+}
+
 type ClaudeOAuthConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	CredentialsPath string `yaml:"credentialsPath"`
-	EndpointURL     string `yaml:"endpointUrl"`
-	BetaHeader      string `yaml:"betaHeader"`
-	UserAgent       string `yaml:"userAgent"`
-	RefreshMs       int64  `yaml:"refreshMs"`
-	StaleMs         int64  `yaml:"staleMs"`
+	Enabled         bool                   `yaml:"enabled"`
+	CredentialsPath string                 `yaml:"credentialsPath"`
+	EndpointURL     string                 `yaml:"endpointUrl"`
+	BetaHeader      string                 `yaml:"betaHeader"`
+	UserAgent       string                 `yaml:"userAgent"`
+	RefreshMs       int64                  `yaml:"refreshMs"`
+	StaleMs         int64                  `yaml:"staleMs"`
+	Metadata        ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type ChatGPTConfig struct {
-	Enabled                 bool   `yaml:"enabled"`
-	AuthPath                string `yaml:"authPath"`
-	EndpointURL             string `yaml:"endpointUrl"`
-	ResetCreditsEndpointURL string `yaml:"resetCreditsEndpointUrl"`
-	ResetConsumeEndpointURL string `yaml:"resetConsumeEndpointUrl"`
-	AllowResetConsume       bool   `yaml:"allowResetConsume"`
-	TokenEnv                string `yaml:"tokenEnv"`
-	AccountIDEnv            string `yaml:"accountIdEnv"`
-	UserAgent               string `yaml:"userAgent"`
-	RefreshMs               int64  `yaml:"refreshMs"`
-	StaleMs                 int64  `yaml:"staleMs"`
+	Enabled                 bool                   `yaml:"enabled"`
+	AuthPath                string                 `yaml:"authPath"`
+	EndpointURL             string                 `yaml:"endpointUrl"`
+	ResetCreditsEndpointURL string                 `yaml:"resetCreditsEndpointUrl"`
+	ResetConsumeEndpointURL string                 `yaml:"resetConsumeEndpointUrl"`
+	AllowResetConsume       bool                   `yaml:"allowResetConsume"`
+	TokenEnv                string                 `yaml:"tokenEnv"`
+	AccountIDEnv            string                 `yaml:"accountIdEnv"`
+	UserAgent               string                 `yaml:"userAgent"`
+	RefreshMs               int64                  `yaml:"refreshMs"`
+	StaleMs                 int64                  `yaml:"staleMs"`
+	Metadata                ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type OpenAIConfig struct {
-	Enabled       bool     `yaml:"enabled"`
-	BaseURL       string   `yaml:"baseUrl"`
-	CostsEndpoint string   `yaml:"costsEndpoint"`
-	APIKeyEnv     string   `yaml:"apiKeyEnv"`
-	RefreshMs     int64    `yaml:"refreshMs"`
-	StaleMs       int64    `yaml:"staleMs"`
-	Budgets       []Budget `yaml:"budgets"`
-	ProjectIDs    []string `yaml:"projectIds"`
-	APIKeyIDs     []string `yaml:"apiKeyIds"`
-	GroupBy       []string `yaml:"groupBy"`
+	Enabled       bool                   `yaml:"enabled"`
+	BaseURL       string                 `yaml:"baseUrl"`
+	CostsEndpoint string                 `yaml:"costsEndpoint"`
+	APIKeyEnv     string                 `yaml:"apiKeyEnv"`
+	RefreshMs     int64                  `yaml:"refreshMs"`
+	StaleMs       int64                  `yaml:"staleMs"`
+	Budgets       []Budget               `yaml:"budgets"`
+	ProjectIDs    []string               `yaml:"projectIds"`
+	APIKeyIDs     []string               `yaml:"apiKeyIds"`
+	GroupBy       []string               `yaml:"groupBy"`
+	Metadata      ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type ZAIConfig struct {
-	Enabled           bool     `yaml:"enabled"`
-	EndpointURL       string   `yaml:"endpointUrl"`
-	TokenEnv          string   `yaml:"tokenEnv"`
-	TokenEnvFallbacks []string `yaml:"tokenEnvFallbacks"`
-	AuthScheme        string   `yaml:"authScheme"`
-	AuthHeader        string   `yaml:"authHeader"`
-	RefreshMs         int64    `yaml:"refreshMs"`
-	StaleMs           int64    `yaml:"staleMs"`
-	ExcludeLimitTypes []string `yaml:"excludeLimitTypes"`
-	VisibleLimitTypes []string `yaml:"visibleLimitTypes"`
+	Enabled           bool                   `yaml:"enabled"`
+	EndpointURL       string                 `yaml:"endpointUrl"`
+	TokenEnv          string                 `yaml:"tokenEnv"`
+	TokenEnvFallbacks []string               `yaml:"tokenEnvFallbacks"`
+	AuthScheme        string                 `yaml:"authScheme"`
+	AuthHeader        string                 `yaml:"authHeader"`
+	RefreshMs         int64                  `yaml:"refreshMs"`
+	StaleMs           int64                  `yaml:"staleMs"`
+	ExcludeLimitTypes []string               `yaml:"excludeLimitTypes"`
+	VisibleLimitTypes []string               `yaml:"visibleLimitTypes"`
+	Metadata          ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type CustomProviderConfig struct {
@@ -104,6 +119,7 @@ type CustomProviderConfig struct {
 	Enabled   bool                   `yaml:"enabled"`
 	RefreshMs int64                  `yaml:"refreshMs"`
 	StaleMs   int64                  `yaml:"staleMs"`
+	Metadata  ProviderMetadataConfig `yaml:"metadata"`
 	Endpoints []CustomEndpointConfig `yaml:"endpoints"`
 }
 
@@ -280,6 +296,7 @@ func Normalize(cfg Config) (Config, error) {
 		cfg.Quota.RefreshMs = int64((5 * time.Minute) / time.Millisecond)
 	}
 	cfg = normalizeProviderDefaults(cfg)
+	cfg = normalizeMetadata(cfg)
 	if cfg.Server.StatePath == "" {
 		cfg.Server.StatePath = "%STATE%/usagent/snapshot.json"
 	}
@@ -469,6 +486,58 @@ func normalizeProviderDefaults(cfg Config) Config {
 		}
 	}
 	return cfg
+}
+
+func normalizeMetadata(cfg Config) Config {
+	cfg.Providers.ClaudeOAuth.Metadata = normalizeProviderMetadata(cfg.Providers.ClaudeOAuth.Metadata)
+	cfg.Providers.ChatGPT.Metadata = normalizeProviderMetadata(cfg.Providers.ChatGPT.Metadata)
+	cfg.Providers.OpenAI.Metadata = normalizeProviderMetadata(cfg.Providers.OpenAI.Metadata)
+	cfg.Providers.ZAI.Metadata = normalizeProviderMetadata(cfg.Providers.ZAI.Metadata)
+	for i := range cfg.Providers.Custom {
+		cfg.Providers.Custom[i].Metadata = normalizeProviderMetadata(cfg.Providers.Custom[i].Metadata)
+	}
+	return cfg
+}
+
+func normalizeProviderMetadata(m ProviderMetadataConfig) ProviderMetadataConfig {
+	m.Tier = strings.TrimSpace(m.Tier)
+	m.Tags = normalizeTags(m.Tags)
+	if len(m.Models) == 0 {
+		return m
+	}
+	for id, model := range m.Models {
+		trimmedID := strings.TrimSpace(id)
+		model.Tier = strings.TrimSpace(model.Tier)
+		model.Tags = normalizeTags(model.Tags)
+		if trimmedID == "" || trimmedID != id {
+			delete(m.Models, id)
+		}
+		if trimmedID != "" {
+			m.Models[trimmedID] = model
+		}
+	}
+	return m
+}
+
+func normalizeTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		key := strings.ToLower(tag)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, tag)
+	}
+	return out
 }
 
 func ExpandRuntimePath(p string) (string, error) {

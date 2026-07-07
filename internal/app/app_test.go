@@ -85,6 +85,48 @@ func TestUsageDoesNotFetchProvidersForHTTPCallers(t *testing.T) {
 	}
 }
 
+func TestUsageIncludesConfiguredMetadataAndOmitsMissingMetadata(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.StatePath = ""
+	cfg.UsageView.Providers = []string{"chatgpt", "mine", "unknown"}
+	cfg.Providers.ChatGPT.Metadata = config.ProviderMetadataConfig{Tier: "high", Tags: []string{"chat", "subscription"}, Models: map[string]config.MetadataConfig{"chatgpt-primary": {Tier: "extra-high", Tags: []string{"codex"}}}}
+	cfg.Providers.Custom = []config.CustomProviderConfig{{ID: "mine", Label: "Mine", Enabled: true, Metadata: config.ProviderMetadataConfig{Tier: "medium", Tags: []string{"custom"}}}}
+	a := New(cfg, nil)
+	now := time.UnixMilli(1000)
+	resetAt := now.Add(time.Hour).UnixMilli()
+	a.Store.UpsertSuccess("chatgpt", "ChatGPT Pro", []model.QuotaItem{{ID: "chatgpt-primary", Provider: "chatgpt", Label: "ChatGPT 5h", Window: model.Window{ID: "session", Label: "S", Kind: "rolling", ResetAt: &resetAt}, Unit: "percent", Limit: 100, Used: 10, Remaining: 90, PercentUsed: 10, Visible: true}}, now, 1000, 2000)
+	a.Store.UpsertSuccess("mine", "Mine", []model.QuotaItem{{ID: "mine-default", Provider: "mine", Label: "Mine quota", Window: model.Window{ID: "daily", Label: "D", Kind: "daily", ResetAt: &resetAt}, Unit: "count", Limit: 10, Used: 1, Remaining: 9, Visible: true}}, now, 1000, 2000)
+	a.Store.UpsertSuccess("unknown", "unknown", []model.QuotaItem{{ID: "unknown-default", Provider: "unknown", Label: "Unknown quota", Window: model.Window{ID: "daily", Label: "D", Kind: "daily", ResetAt: &resetAt}, Unit: "count", Limit: 10, Used: 1, Remaining: 9, Visible: true}}, now, 1000, 2000)
+
+	u := a.Usage(now)
+	providers := map[string]model.Provider{}
+	for _, p := range u.Providers {
+		providers[p.ID] = p
+	}
+	if providers["chatgpt"].Tier != "high" || providers["chatgpt"].Tags[0] != "chat" {
+		t.Fatalf("chatgpt provider metadata=%+v", providers["chatgpt"])
+	}
+	if providers["mine"].Tier != "medium" || providers["mine"].Tags[0] != "custom" {
+		t.Fatalf("custom provider metadata=%+v", providers["mine"])
+	}
+	if providers["unknown"].Tier != "" || len(providers["unknown"].Tags) != 0 {
+		t.Fatalf("unknown provider should omit metadata: %+v", providers["unknown"])
+	}
+	items := map[string]model.QuotaItem{}
+	for _, item := range u.QuotaItems {
+		items[item.ID] = item
+	}
+	if items["chatgpt-primary"].ProviderTier != "high" || items["chatgpt-primary"].ModelTier != "extra-high" || items["chatgpt-primary"].ModelTags[0] != "codex" {
+		t.Fatalf("chatgpt item metadata=%+v", items["chatgpt-primary"])
+	}
+	if items["mine-default"].ProviderTier != "medium" || items["mine-default"].ProviderTags[0] != "custom" {
+		t.Fatalf("custom item metadata=%+v", items["mine-default"])
+	}
+	if items["unknown-default"].ProviderTier != "" || len(items["unknown-default"].ProviderTags) != 0 || items["unknown-default"].ModelTier != "" {
+		t.Fatalf("unknown item should omit metadata: %+v", items["unknown-default"])
+	}
+}
+
 func TestNewWiresEnabledProvidersAndCustomMetadata(t *testing.T) {
 	cfg := config.Default()
 	cfg.Server.StatePath = ""

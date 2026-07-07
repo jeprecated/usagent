@@ -226,7 +226,7 @@ func (s *Store) Overview(now time.Time, providerOrder []model.Provider) model.Us
 			v := ps.LastUpdatedAt
 			last = &v
 		}
-		providersOut = append(providersOut, model.Provider{ID: base.ID, Label: base.Label, State: state, Source: "pull", LastUpdatedAt: last, Error: ps.LastError})
+		providersOut = append(providersOut, model.Provider{ID: base.ID, Label: base.Label, State: state, Source: base.Source, Tier: base.Tier, Tags: cloneStrings(base.Tags), LastUpdatedAt: last, Error: ps.LastError})
 		items = append(items, ps.Items...)
 	}
 	return model.Usage{SchemaVersion: 2, Service: "usagent", GeneratedAt: now.UnixMilli(), Stale: len(items) == 0, Providers: providersOut, QuotaItems: items}
@@ -276,7 +276,18 @@ func cloneItems(in []model.QuotaItem) []model.QuotaItem {
 			e := *in[i].Error
 			out[i].Error = &e
 		}
+		out[i].ProviderTags = cloneStrings(in[i].ProviderTags)
+		out[i].ModelTags = cloneStrings(in[i].ModelTags)
 	}
+	return out
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
 	return out
 }
 func stateOr(v, d string) string {

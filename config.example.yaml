@@ -14,6 +14,14 @@ providers:
     userAgent: "claude-code/2.0"
     refreshMs: 900000
     staleMs: 2700000
+    # Optional non-secret helper metadata. Unknown/unconfigured providers omit tier/tags.
+    # metadata:
+    #   tier: "high"
+    #   tags: ["subscription", "chat"]
+    #   models:
+    #     claude-code-oauth-session:
+    #       tier: "high"
+    #       tags: ["session"]
 
   chatgpt:
     # ChatGPT Plus/Pro subscription quota via Codex/ChatGPT OAuth auth.
@@ -69,6 +77,10 @@ providers:
       enabled: false
       refreshMs: 300000
       staleMs: 900000
+      # Optional non-secret helper metadata for custom providers and their item IDs.
+      # metadata:
+      #   tier: "medium"
+      #   tags: ["custom"]
       endpoints:
         - id: "quota"
           url: "https://example.com/quota"

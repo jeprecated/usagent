@@ -13,6 +13,8 @@ type Provider struct {
 	Label         string        `json:"label"`
 	State         ProviderState `json:"state"`
 	Source        string        `json:"source"`
+	Tier          string        `json:"tier,omitempty"`
+	Tags          []string      `json:"tags,omitempty"`
 	LastUpdatedAt *int64        `json:"lastUpdatedAt,omitempty"`
 	Error         *ItemError    `json:"error,omitempty"`
 }
@@ -46,21 +48,25 @@ type ItemError struct {
 }
 
 type QuotaItem struct {
-	ID          string     `json:"id"`
-	Provider    string     `json:"provider"`
-	Label       string     `json:"label"`
-	Window      Window     `json:"window"`
-	Unit        string     `json:"unit"`
-	Limit       float64    `json:"limit"`
-	Used        float64    `json:"used"`
-	Remaining   float64    `json:"remaining"`
-	PercentUsed float64    `json:"percentUsed"`
-	State       string     `json:"state"`
-	Severity    string     `json:"severity"`
-	Visible     bool       `json:"visible"`
-	Refresh     *Refresh   `json:"refresh,omitempty"`
-	Reset       *Reset     `json:"reset,omitempty"`
-	Error       *ItemError `json:"error,omitempty"`
+	ID           string     `json:"id"`
+	Provider     string     `json:"provider"`
+	Label        string     `json:"label"`
+	Window       Window     `json:"window"`
+	Unit         string     `json:"unit"`
+	Limit        float64    `json:"limit"`
+	Used         float64    `json:"used"`
+	Remaining    float64    `json:"remaining"`
+	PercentUsed  float64    `json:"percentUsed"`
+	State        string     `json:"state"`
+	Severity     string     `json:"severity"`
+	Visible      bool       `json:"visible"`
+	ProviderTier string     `json:"providerTier,omitempty"`
+	ProviderTags []string   `json:"providerTags,omitempty"`
+	ModelTier    string     `json:"modelTier,omitempty"`
+	ModelTags    []string   `json:"modelTags,omitempty"`
+	Refresh      *Refresh   `json:"refresh,omitempty"`
+	Reset        *Reset     `json:"reset,omitempty"`
+	Error        *ItemError `json:"error,omitempty"`
 }
 
 type Usage struct {

@@ -50,13 +50,13 @@ func parseExpiringUsageOptions(r *http.Request, now time.Time) (analysis.Expirin
 		opts.MinimumRemainingPercent = v
 	}
 	if raw := strings.TrimSpace(q.Get("providers")); raw != "" {
-		opts.Providers = map[string]bool{}
-		for _, part := range strings.Split(raw, ",") {
-			provider := strings.TrimSpace(part)
-			if provider != "" {
-				opts.Providers[provider] = true
-			}
-		}
+		opts.Providers = parseCSVSet(raw, false)
+	}
+	if raw := firstNonEmpty(q.Get("tiers"), q.Get("tier")); raw != "" {
+		opts.Tiers = parseCSVSet(raw, true)
+	}
+	if raw := firstNonEmpty(q.Get("tags"), q.Get("tag")); raw != "" {
+		opts.Tags = parseCSVSet(raw, true)
 	}
 	if raw := strings.TrimSpace(q.Get("includeLowConfidence")); raw != "" {
 		v, err := strconv.ParseBool(raw)
@@ -66,4 +66,29 @@ func parseExpiringUsageOptions(r *http.Request, now time.Time) (analysis.Expirin
 		opts.IncludeLowConfidence = v
 	}
 	return opts, nil
+}
+
+func parseCSVSet(raw string, lower bool) map[string]bool {
+	out := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		if lower {
+			value = strings.ToLower(value)
+		}
+		out[value] = true
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

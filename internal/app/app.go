@@ -148,15 +148,61 @@ func (a *App) ProviderModels() []model.Provider {
 		if label == "" {
 			label = LabelFor(id)
 		}
-		out = append(out, model.Provider{ID: id, Label: label, Source: "pull"})
+		metadata := providerMetadataFor(a.Cfg, id)
+		out = append(out, model.Provider{ID: id, Label: label, Source: "pull", Tier: metadata.Tier, Tags: cloneStrings(metadata.Tags)})
 	}
 	return out
 }
 
 func (a *App) Usage(now time.Time) model.Usage {
 	u := a.Store.Overview(now, a.ProviderModels())
+	a.enrichQuotaMetadata(&u)
 	u.StartedAt = a.StartedAt
 	return u
+}
+
+func (a *App) enrichQuotaMetadata(u *model.Usage) {
+	for i := range u.QuotaItems {
+		providerMetadata := providerMetadataFor(a.Cfg, u.QuotaItems[i].Provider)
+		u.QuotaItems[i].ProviderTier = providerMetadata.Tier
+		u.QuotaItems[i].ProviderTags = cloneStrings(providerMetadata.Tags)
+		if providerMetadata.Models != nil {
+			modelMetadata, ok := providerMetadata.Models[u.QuotaItems[i].ID]
+			if ok {
+				u.QuotaItems[i].ModelTier = modelMetadata.Tier
+				u.QuotaItems[i].ModelTags = cloneStrings(modelMetadata.Tags)
+			}
+		}
+	}
+}
+
+func providerMetadataFor(cfg config.Config, id string) config.ProviderMetadataConfig {
+	switch id {
+	case "claude-code":
+		return cfg.Providers.ClaudeOAuth.Metadata
+	case "chatgpt":
+		return cfg.Providers.ChatGPT.Metadata
+	case "openai":
+		return cfg.Providers.OpenAI.Metadata
+	case "z-ai":
+		return cfg.Providers.ZAI.Metadata
+	default:
+		for _, cp := range cfg.Providers.Custom {
+			if cp.ID == id {
+				return cp.Metadata
+			}
+		}
+		return config.ProviderMetadataConfig{}
+	}
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }
 
 func (a *App) BurnRateEstimates(items []model.QuotaItem, now time.Time) map[string]analysis.BurnRateEstimate {

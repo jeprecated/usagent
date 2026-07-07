@@ -47,13 +47,13 @@ func parseProviderRecommendationOptions(r *http.Request, now time.Time) (analysi
 		opts.TaskProfile = task
 	}
 	if raw := strings.TrimSpace(q.Get("providers")); raw != "" {
-		opts.Providers = map[string]bool{}
-		for _, part := range strings.Split(raw, ",") {
-			provider := strings.TrimSpace(part)
-			if provider != "" {
-				opts.Providers[provider] = true
-			}
-		}
+		opts.Providers = parseCSVSet(raw, false)
+	}
+	if raw := firstNonEmpty(q.Get("tiers"), q.Get("tier")); raw != "" {
+		opts.Tiers = parseCSVSet(raw, true)
+	}
+	if raw := firstNonEmpty(q.Get("tags"), q.Get("tag")); raw != "" {
+		opts.Tags = parseCSVSet(raw, true)
 	}
 	if raw := strings.TrimSpace(q.Get("minimumRemainingPercent")); raw != "" {
 		v, err := strconv.ParseFloat(raw, 64)

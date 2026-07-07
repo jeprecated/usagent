@@ -21,6 +21,8 @@ type ProviderRecommendationOptions struct {
 	Now                     time.Time
 	TaskProfile             string
 	Providers               map[string]bool
+	Tiers                   map[string]bool
+	Tags                    map[string]bool
 	MinimumRemainingPercent float64
 	Unit                    string
 	BurnRates               map[string]BurnRateEstimate
@@ -157,6 +159,8 @@ func bestExpiringOpportunities(usage model.Usage, opts ProviderRecommendationOpt
 		Now:                     now,
 		MinimumRemainingPercent: opts.MinimumRemainingPercent,
 		Providers:               opts.Providers,
+		Tiers:                   opts.Tiers,
+		Tags:                    opts.Tags,
 		IncludeLowConfidence:    true,
 		BurnRates:               opts.BurnRates,
 	})
@@ -180,9 +184,13 @@ func recommendationCandidate(provider model.Provider, items []model.QuotaItem, b
 	if len(opts.Providers) > 0 && !opts.Providers[provider.ID] {
 		return ProviderRecommendationCandidate{}, false
 	}
+	providerMatchesMetadata := recommendationMetadataMatches(provider, model.QuotaItem{}, opts)
 	filtered := make([]model.QuotaItem, 0, len(items))
 	for _, item := range items {
 		if !item.Visible || isResetCreditBankItem(item) {
+			continue
+		}
+		if hasRecommendationMetadataFilters(opts) && !recommendationMetadataMatches(provider, item, opts) {
 			continue
 		}
 		if opts.Unit != "" && !strings.EqualFold(unitOrDefault(item.Unit), opts.Unit) {
@@ -191,6 +199,9 @@ func recommendationCandidate(provider model.Provider, items []model.QuotaItem, b
 		filtered = append(filtered, item)
 	}
 	if opts.Unit != "" && len(filtered) == 0 {
+		return ProviderRecommendationCandidate{}, false
+	}
+	if hasRecommendationMetadataFilters(opts) && len(filtered) == 0 && !providerMatchesMetadata {
 		return ProviderRecommendationCandidate{}, false
 	}
 
@@ -248,6 +259,43 @@ func recommendationCandidate(provider model.Provider, items []model.QuotaItem, b
 		}
 	}
 	return candidate, true
+}
+
+func hasRecommendationMetadataFilters(opts ProviderRecommendationOptions) bool {
+	return len(opts.Tiers) > 0 || len(opts.Tags) > 0
+}
+
+func recommendationMetadataMatches(provider model.Provider, item model.QuotaItem, opts ProviderRecommendationOptions) bool {
+	if len(opts.Tiers) > 0 && !recommendationMatchesTier(provider, item, opts.Tiers) {
+		return false
+	}
+	if len(opts.Tags) > 0 && !recommendationMatchesTags(provider, item, opts.Tags) {
+		return false
+	}
+	return true
+}
+
+func recommendationMatchesTier(provider model.Provider, item model.QuotaItem, tiers map[string]bool) bool {
+	return tiers[strings.ToLower(provider.Tier)] || tiers[strings.ToLower(item.ProviderTier)] || tiers[strings.ToLower(item.ModelTier)]
+}
+
+func recommendationMatchesTags(provider model.Provider, item model.QuotaItem, tags map[string]bool) bool {
+	for _, tag := range provider.Tags {
+		if tags[strings.ToLower(tag)] {
+			return true
+		}
+	}
+	for _, tag := range item.ProviderTags {
+		if tags[strings.ToLower(tag)] {
+			return true
+		}
+	}
+	for _, tag := range item.ModelTags {
+		if tags[strings.ToLower(tag)] {
+			return true
+		}
+	}
+	return false
 }
 
 func availabilityScore(provider model.Provider, items []model.QuotaItem, candidate *ProviderRecommendationCandidate) float64 {
