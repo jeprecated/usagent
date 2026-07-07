@@ -22,7 +22,20 @@ type ExpiringUsageOptions struct {
 	MinimumRemainingPercent float64
 	Providers               map[string]bool
 	IncludeLowConfidence    bool
+	BurnRates               map[string]BurnRateEstimate
 }
+
+type BurnRateEstimate struct {
+	BurnPerMs    float64
+	Source       string
+	Confidence   string
+	Since        int64
+	Until        int64
+	Samples      int
+	WindowToDate bool
+}
+
+func BurnRateKey(provider, itemID string) string { return provider + "\x00" + itemID }
 
 type ExpiringUsageResponse struct {
 	GeneratedAt   int64                      `json:"generatedAt"`
@@ -97,9 +110,17 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 
 	confidence := ConfidenceLow
 	caveats := []string{}
-	duration, inferred := inferWindowDuration(item)
 	natural := 0.0
-	if inferred {
+	rateSource := ""
+	if rate, ok := opts.BurnRates[BurnRateKey(item.Provider, item.ID)]; ok && rate.BurnPerMs >= 0 {
+		natural = rate.BurnPerMs * float64(timeRemaining.Milliseconds())
+		confidence = normalizedConfidence(rate.Confidence, ConfidenceHigh)
+		rateSource = rate.Source
+		if rateSource == "" {
+			rateSource = "local history burn rate"
+		}
+		caveats = append(caveats, fmt.Sprintf("natural use estimated from %s (%d samples)", rateSource, rate.Samples))
+	} else if duration, inferred := inferWindowDuration(item); inferred {
 		elapsed := duration - timeRemaining
 		if elapsed > 0 {
 			burnPerMs := item.Used / float64(elapsed.Milliseconds())
@@ -139,7 +160,9 @@ func expiringOpportunity(item model.QuotaItem, opts ExpiringUsageOptions, now ti
 	reasons := []string{
 		fmt.Sprintf("%s remains with about %s until reset", formatAmount(item.Remaining, unit), formatDurationApprox(timeRemaining)),
 	}
-	if confidence == ConfidenceMedium {
+	if rateSource != "" {
+		reasons = append(reasons, "recent local history burn rate is unlikely to consume the remainder")
+	} else if confidence == ConfidenceMedium {
 		reasons = append(reasons, "current inferred burn rate is unlikely to consume the remainder")
 	} else {
 		reasons = append(reasons, "remaining quota may expire unused, but burn rate confidence is low")
@@ -217,6 +240,15 @@ func inferWindowDuration(item model.QuotaItem) (time.Duration, bool) {
 		return 30 * 24 * time.Hour, true
 	default:
 		return 0, false
+	}
+}
+
+func normalizedConfidence(value, fallback string) string {
+	switch value {
+	case ConfidenceHigh, ConfidenceMedium, ConfidenceLow:
+		return value
+	default:
+		return fallback
 	}
 }
 

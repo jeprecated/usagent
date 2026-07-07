@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jmalloc/usagent/internal/analysis"
 	"github.com/jmalloc/usagent/internal/cache"
 	"github.com/jmalloc/usagent/internal/config"
+	"github.com/jmalloc/usagent/internal/history"
 	"github.com/jmalloc/usagent/internal/model"
 	"github.com/jmalloc/usagent/internal/providers"
 	"github.com/jmalloc/usagent/internal/providers/chatgpt"
@@ -24,6 +26,7 @@ type ProviderTiming struct{ RefreshMs, StaleMs int64 }
 type App struct {
 	Cfg       config.Config
 	Store     *cache.Store
+	History   *history.Store
 	Providers []providers.Provider
 	Timings   map[string]ProviderTiming
 	StartedAt int64
@@ -88,7 +91,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		ps = append(ps, noop.New(id, label))
 		timings[id] = ProviderTiming{RefreshMs: cfg.Quota.RefreshMs, StaleMs: max(cfg.Quota.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))}
 	}
-	return &App{Cfg: cfg, Store: cache.NewStore(cfg.Server.StatePath), Providers: ps, Timings: timings, StartedAt: time.Now().UnixMilli(), Logger: logger, inFlight: map[string]bool{}}
+	return &App{Cfg: cfg, Store: cache.NewStore(cfg.Server.StatePath), History: history.NewStore(history.DefaultPath(cfg.Server.StatePath)), Providers: ps, Timings: timings, StartedAt: time.Now().UnixMilli(), Logger: logger, inFlight: map[string]bool{}}
 }
 
 func LabelFor(id string) string {
@@ -125,7 +128,17 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-func (a *App) LoadState() error { return a.Store.Load() }
+func (a *App) LoadState() error {
+	if err := a.Store.Load(); err != nil {
+		return err
+	}
+	if a.History != nil {
+		if err := a.History.Load(); err != nil {
+			a.Logger.Warn("usage history load failed", "error", err)
+		}
+	}
+	return nil
+}
 
 func (a *App) ProviderModels() []model.Provider {
 	labels := labelsFor(a.Cfg)
@@ -144,6 +157,25 @@ func (a *App) Usage(now time.Time) model.Usage {
 	u := a.Store.Overview(now, a.ProviderModels())
 	u.StartedAt = a.StartedAt
 	return u
+}
+
+func (a *App) BurnRateEstimates(items []model.QuotaItem, now time.Time) map[string]analysis.BurnRateEstimate {
+	out := map[string]analysis.BurnRateEstimate{}
+	if a.History == nil {
+		return out
+	}
+	for key, rate := range a.History.Rates(items, now) {
+		out[key] = analysis.BurnRateEstimate{
+			BurnPerMs:    rate.BurnPerMs,
+			Source:       rate.Source,
+			Confidence:   rate.Confidence,
+			Since:        rate.Since,
+			Until:        rate.Until,
+			Samples:      rate.Samples,
+			WindowToDate: rate.WindowToDate,
+		}
+	}
+	return out
 }
 
 func (a *App) ChatGPTResetCredits(ctx context.Context, now time.Time) (model.ChatGPTResetCreditsResponse, error) {
@@ -204,10 +236,18 @@ func (a *App) RefreshOne(ctx context.Context, p providers.Provider, now time.Tim
 	if err != nil {
 		a.Logger.Warn("provider refresh failed", "provider", p.ID(), "error", err)
 	} else {
+		if a.History != nil {
+			a.History.Record(p.ID(), result.Items, now)
+		}
 		a.Logger.Debug("provider refreshed", "provider", p.ID(), "items", len(result.Items))
 	}
 	if err := a.Store.Save(); err != nil {
 		a.Logger.Warn("state save failed", "error", err)
+	}
+	if a.History != nil {
+		if err := a.History.Save(); err != nil {
+			a.Logger.Warn("usage history save failed", "error", err)
+		}
 	}
 }
 

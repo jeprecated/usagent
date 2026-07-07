@@ -18,6 +18,7 @@ func (api API) expiringUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	usage := api.App.Usage(now)
+	opts.BurnRates = api.App.BurnRateEstimates(usage.QuotaItems, now)
 	writeJSON(w, http.StatusOK, analysis.ExpiringUsage(usage, opts))
 }
 

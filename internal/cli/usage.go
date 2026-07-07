@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jmalloc/usagent/internal/analysis"
 	"github.com/jmalloc/usagent/internal/app"
 	"github.com/jmalloc/usagent/internal/config"
 	"github.com/jmalloc/usagent/internal/model"
@@ -140,40 +141,50 @@ func FetchUsageFromDaemon(ctx context.Context, cfg config.Config, timeout time.D
 }
 
 func LocalUsage(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, error) {
+	usage, _, err := LocalUsageAndBurnRates(ctx, cfg, timeout)
+	return usage, err
+}
+
+func LocalUsageAndBurnRates(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, map[string]analysis.BurnRateEstimate, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a := app.New(cfg, logger)
 	if err := a.LoadState(); err != nil {
-		return model.Usage{}, err
+		return model.Usage{}, nil, err
 	}
 	now := time.Now()
 	if !hasDueProvider(a, now) {
-		return a.Usage(now), nil
+		usage := a.Usage(now)
+		return usage, a.BurnRateEstimates(usage.QuotaItems, now), nil
 	}
 	unlock, locked, err := acquireLocalRefreshLock(ctx, cfg.Server.StatePath)
 	if err != nil {
-		return model.Usage{}, err
+		return model.Usage{}, nil, err
 	}
 	if !locked {
-		return a.Usage(time.Now()), nil
+		now := time.Now()
+		usage := a.Usage(now)
+		return usage, a.BurnRateEstimates(usage.QuotaItems, now), nil
 	}
 	defer unlock()
 	// Another local process may have refreshed while this process waited for the
 	// lock. Reload before deciding which providers are still due.
 	if err := a.LoadState(); err != nil {
-		return model.Usage{}, err
+		return model.Usage{}, nil, err
 	}
 	now = time.Now()
 	for _, p := range a.Providers {
 		if ctx.Err() != nil {
-			return model.Usage{}, ctx.Err()
+			return model.Usage{}, nil, ctx.Err()
 		}
 		if a.Store.NeedsRefresh(p.ID(), now) {
 			a.RefreshOne(ctx, p, now)
 		}
 	}
-	return a.Usage(time.Now()), nil
+	now = time.Now()
+	usage := a.Usage(now)
+	return usage, a.BurnRateEstimates(usage.QuotaItems, now), nil
 }
 
 func hasDueProvider(a *app.App, now time.Time) bool {

@@ -29,6 +29,27 @@ func TestExpiringUsageHighOpportunity(t *testing.T) {
 	}
 }
 
+func TestExpiringUsagePrefersHistoricalBurnRate(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	usage := model.Usage{QuotaItems: []model.QuotaItem{
+		quotaItem("claude-code", "claude-code-weekly", "Claude weekly", 1, 99, now.Add(24*time.Hour)),
+	}}
+
+	res := ExpiringUsage(usage, ExpiringUsageOptions{Now: now, BurnRates: map[string]BurnRateEstimate{
+		BurnRateKey("claude-code", "claude-code-weekly"): {BurnPerMs: 80 / float64((24 * time.Hour).Milliseconds()), Source: "1h local history burn rate", Confidence: ConfidenceHigh, Samples: 4},
+	}})
+	if len(res.Opportunities) != 1 {
+		t.Fatalf("opportunities=%+v", res.Opportunities)
+	}
+	op := res.Opportunities[0]
+	if op.Confidence != ConfidenceHigh || op.EstimatedNaturalUseBeforeReset != 80 || op.EstimatedWastedAmount != 19 {
+		t.Fatalf("historical estimate not used: %+v", op)
+	}
+	if !contains(op.Caveats, "natural use estimated from 1h local history burn rate (4 samples)") {
+		t.Fatalf("missing history caveat: %+v", op.Caveats)
+	}
+}
+
 func TestExpiringUsageFiltersLowRemainingQuota(t *testing.T) {
 	now := time.UnixMilli(1_000_000)
 	usage := model.Usage{QuotaItems: []model.QuotaItem{

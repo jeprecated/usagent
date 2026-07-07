@@ -64,11 +64,14 @@ func RunExpiringUsage(ctx context.Context, args []string, stdout io.Writer, stde
 		}
 	}
 
-	usage, err := LocalUsage(ctx, cfg, opts.Timeout)
+	usage, rates, err := LocalUsageAndBurnRates(ctx, cfg, opts.Timeout)
 	if err != nil {
 		return err
 	}
-	res := analysis.ExpiringUsage(usage, opts.analysisOptions(time.Now()))
+	now := time.Now()
+	analysisOpts := opts.analysisOptions(now)
+	analysisOpts.BurnRates = rates
+	res := analysis.ExpiringUsage(usage, analysisOpts)
 	return writeExpiringUsage(stdout, res, opts.JSON)
 }
 

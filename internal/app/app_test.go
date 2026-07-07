@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,6 +45,28 @@ func TestRefreshDueDoesNotStartConcurrentFetchesForSameProvider(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := atomic.LoadInt32(&p.count); got != 1 {
 		t.Fatalf("fetch count after completion=%d", got)
+	}
+}
+
+func TestRefreshOneRecordsLocalUsageHistory(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.StatePath = filepath.Join(t.TempDir(), "snapshot.json")
+	cfg.UsageView.Providers = []string{"fake"}
+	a := New(cfg, nil)
+	p := &slowProvider{id: "fake", block: make(chan struct{})}
+	close(p.block)
+	a.Providers = []providers.Provider{p}
+	a.Timings["fake"] = ProviderTiming{RefreshMs: 1000, StaleMs: 2000}
+	a.RefreshOne(context.Background(), p, time.UnixMilli(1000))
+	if got := len(a.History.Samples()); got != 1 {
+		t.Fatalf("history samples=%d", got)
+	}
+	loaded := New(cfg, nil)
+	if err := loaded.LoadState(); err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if got := len(loaded.History.Samples()); got != 1 {
+		t.Fatalf("loaded history samples=%d", got)
 	}
 }
 

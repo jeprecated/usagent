@@ -23,3 +23,23 @@ Create a pure analysis layer over cached `model.Usage` snapshots and expose it a
 ## Implementation Notes
 
 Relevant files: internal/model/model.go, internal/httpapi/httpapi.go, internal/app/app.go, internal/httpapi/httpapi_test.go. Start with conservative inference: session≈5h, weekly≈7d, monthly calendar/month-ish only when resetAt exists, daily≈24h.
+
+
+## Completion Summary
+
+- Delegated implementation to Agentleman run agm-run-20260707134913-9y1yql and integrated after Claude judge ACCEPT verdict.
+- Added pure cached usage analysis derivation over `model.Usage` with per-item reset/window/pace/pressure/projection/confidence/caveat fields.
+- Exposed cached-only `GET /v1/usage/analysis` and documented the endpoint.
+- Added analysis and HTTP tests; verified in parent with `devenv shell go test ./...`.
+
+### Files Changed
+
+- README.md
+- docs/DESIGN.md
+- internal/analysis/usage_analysis.go
+- internal/analysis/usage_analysis_test.go
+- internal/httpapi/httpapi.go
+- internal/httpapi/httpapi_test.go
+- .frontloop/usage-helper-apis/done/2500-add-quota-analysis-derivation-package-and-endpoint.md
+- .frontloop/usage-helper-apis/brief-quota-analysis.md
+- .frontloop/usage-helper-apis/judge-quota-analysis.md
