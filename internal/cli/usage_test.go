@@ -19,12 +19,13 @@ import (
 )
 
 func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {
-	usage := model.Usage{Providers: []model.Provider{{ID: "claude-code", Label: "Claude", State: model.ProviderStateFresh}, {ID: "openai", Label: "OpenAI", State: model.ProviderStateStale}, {ID: "z-ai", Label: "z.ai", State: model.ProviderStateError}}, QuotaItems: []model.QuotaItem{
+	usage := model.Usage{Providers: []model.Provider{{ID: "claude-code", Label: "Claude", State: model.ProviderStateFresh}, {ID: "openai", Label: "OpenAI", State: model.ProviderStateStale}, {ID: "z-ai", Label: "z.ai", State: model.ProviderStateFresh}}, QuotaItems: []model.QuotaItem{
 		{ID: "claude-session", Provider: "claude-code", Label: "Claude session", Window: model.Window{ID: "session", Label: "S", Kind: "rolling"}, Unit: "percent", Remaining: 88, State: "fresh", Visible: true},
 		{ID: "openai-week", Provider: "openai", Label: "OpenAI week", Window: model.Window{ID: "week", Label: "W", Kind: "weekly"}, Unit: "usd", Remaining: 42.5, State: "stale", Visible: true},
+		{ID: "zai-week", Provider: "z-ai", Label: "z.ai week", Window: model.Window{ID: "week", Label: "W", Kind: "weekly"}, Unit: "M tokens", Limit: 6, Used: 3.06, Remaining: 2.94, PercentUsed: 51, State: "fresh", Visible: true},
 	}}
 	got := FormatUsage(usage)
-	want := "Claude: S 88% remaining\nOpenAI: W $42.50 remaining [stale]\nz.ai: unavailable [error]\n"
+	want := "Claude: S 88% remaining\nOpenAI: W $42.50 remaining [stale]\nz.ai: W 2.94 M tokens (49%) remaining\n"
 	if got != want {
 		t.Fatalf("FormatUsage()=\n%s\nwant=\n%s", got, want)
 	}
@@ -181,7 +182,7 @@ quota:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); got != "Mine: W 75 tokens remaining\n" {
+	if got := stdout.String(); got != "Mine: W 75 tokens (75%) remaining\n" {
 		t.Fatalf("stdout=%q stderr=%q", got, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "daemon unavailable") {

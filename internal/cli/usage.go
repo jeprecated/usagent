@@ -298,14 +298,32 @@ func formatRemaining(item model.QuotaItem) string {
 	case "percent", "%":
 		return fmt.Sprintf("%s remaining", formatNumber(remaining)+"%")
 	case "usd":
-		return fmt.Sprintf("$%s remaining", formatNumber(remaining))
+		return fmt.Sprintf("$%s%s remaining", formatNumber(remaining), formatRemainingPercentSuffix(item))
 	default:
 		unit := item.Unit
 		if unit == "" {
 			unit = "units"
 		}
-		return fmt.Sprintf("%s %s remaining", formatNumber(remaining), unit)
+		return fmt.Sprintf("%s %s%s remaining", formatNumber(remaining), unit, formatRemainingPercentSuffix(item))
 	}
+}
+
+func formatRemainingPercentSuffix(item model.QuotaItem) string {
+	percent, ok := itemRemainingPercent(item)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(" (%s%%)", formatNumber(percent))
+}
+
+func itemRemainingPercent(item model.QuotaItem) (float64, bool) {
+	if item.Limit > 0 {
+		return math.Max(0, math.Min(100, item.Remaining/item.Limit*100)), true
+	}
+	if item.PercentUsed > 0 || item.Used > 0 {
+		return math.Max(0, math.Min(100, 100-item.PercentUsed)), true
+	}
+	return 0, false
 }
 
 func formatNumber(v float64) string {
