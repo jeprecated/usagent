@@ -42,6 +42,11 @@ type authFile struct {
 		AccessToken string `json:"access_token"`
 		AccountID   string `json:"account_id"`
 	} `json:"tokens"`
+	OpenAICodex struct {
+		Type      string `json:"type"`
+		Access    string `json:"access"`
+		AccountID string `json:"accountId"`
+	} `json:"openai-codex"`
 }
 
 type usagePayload struct {
@@ -216,10 +221,16 @@ func credentials(cfg config.ChatGPTConfig) (token, accountID string, err error) 
 	if err := json.Unmarshal(b, &auth); err != nil {
 		return "", "", fmt.Errorf("parse chatgpt auth: %w", err)
 	}
-	if auth.Tokens.AccessToken == "" {
-		return "", "", errors.New("chatgpt auth missing tokens.access_token")
+	fileToken := auth.Tokens.AccessToken
+	fileAccountID := auth.Tokens.AccountID
+	if fileToken == "" {
+		fileToken = auth.OpenAICodex.Access
+		fileAccountID = auth.OpenAICodex.AccountID
 	}
-	return auth.Tokens.AccessToken, firstNonEmpty(accountID, auth.Tokens.AccountID), nil
+	if fileToken == "" {
+		return "", "", errors.New("chatgpt auth missing Codex tokens.access_token or Pi openai-codex.access")
+	}
+	return fileToken, firstNonEmpty(accountID, fileAccountID), nil
 }
 
 func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []model.QuotaItem {

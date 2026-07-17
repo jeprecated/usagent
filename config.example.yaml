@@ -25,6 +25,7 @@ providers:
 
   chatgpt:
     # ChatGPT Plus/Pro subscription quota via Codex/ChatGPT OAuth auth.
+    # Accepts Codex CLI ~/.codex/auth.json or Pi ~/.pi/agent/auth.json.
     enabled: false
     authPath: "~/.codex/auth.json"
     endpointUrl: "https://chatgpt.com/backend-api/wham/usage"

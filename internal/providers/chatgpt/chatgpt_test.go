@@ -73,6 +73,36 @@ func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {
 	}
 }
 
+func TestChatGPTFetchReadsPiOAuthAuthFile(t *testing.T) {
+	t.Setenv("CHATGPT_ACCESS_TOKEN", "")
+	t.Setenv("CHATGPT_ACCOUNT_ID", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"openai-codex":{"type":"oauth","access":"pi-access-token","refresh":"unused","expires":9999999999999,"accountId":"acct-pi"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var authorization, accountID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("authorization")
+		accountID = r.Header.Get("chatgpt-account-id")
+		fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false}}`)
+	}))
+	defer srv.Close()
+
+	_, err := NewWithClient(config.ChatGPTConfig{
+		AuthPath:     authPath,
+		EndpointURL:  srv.URL,
+		TokenEnv:     "CHATGPT_ACCESS_TOKEN",
+		AccountIDEnv: "CHATGPT_ACCOUNT_ID",
+	}, srv.Client()).Fetch(context.Background(), time.UnixMilli(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorization != "Bearer pi-access-token" || accountID != "acct-pi" {
+		t.Fatalf("headers auth=%q account=%q", authorization, accountID)
+	}
+}
+
 func TestResetCreditListAndConsume(t *testing.T) {
 	t.Setenv("CHATGPT_ACCESS_TOKEN", "token")
 	t.Setenv("CHATGPT_ACCOUNT_ID", "acct")
