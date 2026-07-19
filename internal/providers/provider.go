@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 type Result struct {

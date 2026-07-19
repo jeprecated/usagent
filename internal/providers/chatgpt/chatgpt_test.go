@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/config"
 )
 
 func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {

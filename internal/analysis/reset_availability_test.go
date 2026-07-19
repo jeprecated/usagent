@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 func TestResetCalendarSortsVisibleItemsAndSkipsNoReset(t *testing.T) {

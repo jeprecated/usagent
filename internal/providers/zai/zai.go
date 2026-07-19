@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/config"
-	"github.com/jmalloc/usagent/internal/model"
-	"github.com/jmalloc/usagent/internal/providers"
-	"github.com/jmalloc/usagent/internal/ratelimit"
+	"github.com/jeprecated/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/providers"
+	"github.com/jeprecated/usagent/internal/ratelimit"
 )
 
 const defaultEndpoint = "https://api.z.ai/api/monitor/usage/quota/limit"

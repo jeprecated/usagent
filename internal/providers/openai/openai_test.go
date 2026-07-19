@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/config"
 )
 
 func TestOpenAICostNormalizationWeeklyMonthlyMultiBucketAndPagination(t *testing.T) {

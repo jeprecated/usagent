@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/analysis"
 )
 
 func TestFetchExpiringUsageFromDaemonPassesQueryParams(t *testing.T) {

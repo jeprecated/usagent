@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 const (

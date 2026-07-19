@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/analysis"
 )
 
 func (api API) expiringUsage(w http.ResponseWriter, r *http.Request) {

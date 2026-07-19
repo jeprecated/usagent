@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/app"
-	"github.com/jmalloc/usagent/internal/cli"
-	"github.com/jmalloc/usagent/internal/config"
-	"github.com/jmalloc/usagent/internal/httpapi"
-	"github.com/jmalloc/usagent/internal/mcp"
+	"github.com/jeprecated/usagent/internal/app"
+	"github.com/jeprecated/usagent/internal/cli"
+	"github.com/jeprecated/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/httpapi"
+	"github.com/jeprecated/usagent/internal/mcp"
 )
 
 func main() {

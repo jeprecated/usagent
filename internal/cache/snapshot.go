@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/model"
-	"github.com/jmalloc/usagent/internal/providers"
+	"github.com/jeprecated/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/providers"
 )
 
 type ProviderSnapshot struct {

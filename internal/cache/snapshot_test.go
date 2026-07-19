@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 func TestStoreSaveLoadAtomicSnapshot(t *testing.T) {

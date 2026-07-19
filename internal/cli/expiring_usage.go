@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/analysis"
-	"github.com/jmalloc/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/config"
 )
 
 type ExpiringUsageOptions struct {

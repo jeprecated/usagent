@@ -19,10 +19,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/analysis"
-	"github.com/jmalloc/usagent/internal/app"
-	"github.com/jmalloc/usagent/internal/config"
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/app"
+	"github.com/jeprecated/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 type UsageOptions struct {

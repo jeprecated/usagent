@@ -1,4 +1,4 @@
-module github.com/jmalloc/usagent
+module github.com/jeprecated/usagent
 
 go 1.22
 

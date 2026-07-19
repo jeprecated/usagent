@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/config"
-	"github.com/jmalloc/usagent/internal/model"
+	"github.com/jeprecated/usagent/internal/config"
+	"github.com/jeprecated/usagent/internal/model"
 )
 
 func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {

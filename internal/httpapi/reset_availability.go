@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jmalloc/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/analysis"
 )
 
 func (api API) resets(w http.ResponseWriter, r *http.Request) {
