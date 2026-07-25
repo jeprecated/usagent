@@ -40,6 +40,24 @@ func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
 	}
 }
 
+func TestFormatUsageAppendsStalenessAge(t *testing.T) {
+	const now int64 = 1_784_972_820_779 // 2026-07-25 11:47:00
+	day := int64(24 * 60 * 60 * 1000)
+	// Items are sorted by FormatUsage as (windowID, id), so the expected line
+	// below is ordered: ancient < resetCredits < weekly(primary, secondary).
+	usage := model.Usage{GeneratedAt: now, Providers: []model.Provider{{ID: "chatgpt", Label: "ChatGPT Pro", State: model.ProviderStateStale}}, QuotaItems: []model.QuotaItem{
+		{ID: "chatgpt-primary", Provider: "chatgpt", Label: "ChatGPT 5h", Window: model.Window{ID: "weekly", Label: "W", Kind: "weekly"}, Unit: "percent", Limit: 100, Remaining: 27, State: "stale", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: now - 58*60*1000}},
+		{ID: "chatgpt-secondary", Provider: "chatgpt", Label: "ChatGPT weekly", Window: model.Window{ID: "weekly", Label: "W", Kind: "weekly"}, Unit: "percent", Limit: 100, Remaining: 100, State: "stale", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: now - 18*60*60*1000}},
+		{ID: "chatgpt-never", Provider: "chatgpt", Label: "ChatGPT resets", Window: model.Window{ID: "resetCredits", Label: "Resets", Kind: "credit"}, Unit: "credits", Limit: 2, Remaining: 2, State: "stale", Visible: true},
+		{ID: "chatgpt-ancient", Provider: "chatgpt", Label: "ChatGPT ancient", Window: model.Window{ID: "ancient", Label: "A", Kind: "weekly"}, Unit: "percent", Limit: 100, Remaining: 50, State: "stale", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: now - 3*day}},
+	}}
+	got := FormatUsage(usage)
+	want := "ChatGPT Pro: A 50% remaining [stale 3d] · Resets 2 credits (100%) remaining [stale] · W 27% remaining [stale 58m] · W 100% remaining [stale 18h]\n"
+	if got != want {
+		t.Fatalf("FormatUsage()=\n%s\nwant=\n%s", got, want)
+	}
+}
+
 func TestAcquireLocalRefreshLockReturnsUnlockedWhenBusy(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "snapshot.json")
 	unlock, locked, err := acquireLocalRefreshLock(context.Background(), statePath)

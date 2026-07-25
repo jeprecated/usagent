@@ -246,6 +246,7 @@ func FormatUsage(usage model.Usage) string {
 			return left.Window.ID < right.Window.ID
 		})
 	}
+	now := usage.GeneratedAt
 	lines := []string{}
 	for _, provider := range usage.Providers {
 		items := itemsByProvider[provider.ID]
@@ -267,7 +268,7 @@ func FormatUsage(usage model.Usage) string {
 			if item.State != "" && item.State != "fresh" {
 				hasItemState = true
 			}
-			parts = append(parts, formatItem(item))
+			parts = append(parts, formatItem(item, now))
 		}
 		line := fmt.Sprintf("%s: %s", provider.Label, strings.Join(parts, " · "))
 		if state != "fresh" && !hasItemState {
@@ -291,16 +292,43 @@ func writeUsage(w io.Writer, usage model.Usage, asJSON bool) error {
 	return err
 }
 
-func formatItem(item model.QuotaItem) string {
+func formatItem(item model.QuotaItem, now int64) string {
 	label := item.Window.Label
 	if label == "" {
 		label = item.Label
 	}
 	value := formatRemaining(item)
 	if item.State != "" && item.State != "fresh" {
-		value += " [" + item.State + "]"
+		suffix := item.State
+		if age := staleAge(item, now); age != "" {
+			suffix += " " + age
+		}
+		value += " [" + suffix + "]"
 	}
 	return fmt.Sprintf("%s %s", label, value)
+}
+
+// staleAge renders how long ago a stale item's value was last refreshed as a
+// compact m/h/d duration. It returns "" when no reliable timestamp is present
+// (e.g. the item never refreshed successfully).
+func staleAge(item model.QuotaItem, now int64) string {
+	if item.Refresh == nil || item.Refresh.LastUpdatedAt <= 0 || now <= 0 {
+		return ""
+	}
+	secs := (now - item.Refresh.LastUpdatedAt) / 1000
+	if secs < 0 {
+		secs = 0
+	}
+	switch {
+	case secs >= 86400:
+		return fmt.Sprintf("%dd", secs/86400)
+	case secs >= 3600:
+		return fmt.Sprintf("%dh", secs/3600)
+	case secs >= 60:
+		return fmt.Sprintf("%dm", secs/60)
+	default:
+		return "<1m"
+	}
 }
 
 func formatRemaining(item model.QuotaItem) string {
