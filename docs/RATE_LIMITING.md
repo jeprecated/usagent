@@ -1,6 +1,14 @@
 # Rate-limit policy
 
-`usagent` is a polling daemon. HTTP readers (`/v1/usage`, `usagent usage`) never call upstream provider APIs when the daemon is available; they read the latest persisted snapshot. Provider calls happen only in the refresh loop or in explicit local/offline CLI fallback.
+`usagent` is a polling daemon. HTTP readers never call upstream provider APIs; they read the daemon's latest snapshot. Client commands may call providers only through policy-permitted local fallback or intentional local/offline operation.
+
+## Central daemon clients
+
+In a one-poller/many-reader deployment, every reader uses `client.mode: require-daemon`. Require-daemon CLI and MCP clients never poll providers: on connection, timeout, non-2xx, missing-endpoint, or response-validation failure they fail closed without entering refresh scheduling, backoff, local locks, state, or history paths. Only the central `usagent serve` process participates in provider refresh scheduling and upstream retry/backoff.
+
+`prefer-daemon` intentionally retains local fallback and its shared refresh lock for backward compatibility. An explicit `--daemon-url` suppresses an alternate-daemon attempt but still permits local fallback in prefer-daemon mode. `local-only` and policy-permitted `--offline` are intentional local polling modes and should not be used on pure reader hosts.
+
+Upgrade the central daemon before its require-daemon clients. If a newer client requests an endpoint an older daemon does not provide, require-daemon fails closed instead of polling the provider itself.
 
 ## Global behavior
 

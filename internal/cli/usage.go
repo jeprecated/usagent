@@ -9,9 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,17 +18,31 @@ import (
 
 	"github.com/jeprecated/usagent/internal/analysis"
 	"github.com/jeprecated/usagent/internal/app"
+	"github.com/jeprecated/usagent/internal/clientpolicy"
 	"github.com/jeprecated/usagent/internal/config"
 	"github.com/jeprecated/usagent/internal/model"
 )
 
 type UsageOptions struct {
-	ConfigPath string
-	Host       string
-	Port       int
-	JSON       bool
-	Offline    bool
-	Timeout    time.Duration
+	ConfigPath   string
+	DaemonURL    string
+	DaemonURLSet bool
+	Host         string
+	HostSet      bool
+	Port         int
+	PortSet      bool
+	JSON         bool
+	Offline      bool
+	Timeout      time.Duration
+}
+
+func (opts UsageOptions) policyFlags() clientpolicy.FlagOptions {
+	return clientpolicy.FlagOptions{
+		DaemonURL: opts.DaemonURL, DaemonURLSet: opts.DaemonURLSet,
+		Host: opts.Host, HostSet: opts.HostSet,
+		Port: opts.Port, PortSet: opts.PortSet,
+		Offline: opts.Offline,
+	}
 }
 
 func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
@@ -39,7 +50,7 @@ func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return err
 	}
-	cfg, err := config.LoadWithOverrides(opts.ConfigPath, config.CLIOptions{ConfigPath: opts.ConfigPath, Host: opts.Host, Port: opts.Port})
+	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return err
 	}
@@ -48,21 +59,19 @@ func RunUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Wr
 	}
 
 	var usage model.Usage
-	if !opts.Offline {
-		usage, err = FetchUsageFromDaemon(ctx, cfg, opts.Timeout)
-		if err == nil {
-			return writeUsage(stdout, usage, opts.JSON)
-		}
-		primaryErr := err
-		if fallback, ok := loadUserDaemonConfig(opts.ConfigPath); ok {
-			usage, err = FetchUsageFromDaemon(ctx, fallback, opts.Timeout)
-			if err == nil {
-				return writeUsage(stdout, usage, opts.JSON)
-			}
-		}
-		if stderr != nil {
-			_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, refreshing locally: %v\n", primaryErr)
-		}
+	access, err := accessDaemon(ctx, cfg, opts.ConfigPath, opts.policyFlags(), opts.Timeout, func(client daemonClient) error {
+		var requestErr error
+		usage, requestErr = fetchUsageFromDaemon(ctx, client)
+		return requestErr
+	})
+	if err != nil {
+		return err
+	}
+	if !access.useLocal {
+		return writeUsage(stdout, usage, opts.JSON)
+	}
+	if access.diagnostic != nil && stderr != nil {
+		_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, refreshing locally: %v\n", access.diagnostic)
 	}
 	usage, err = LocalUsage(ctx, cfg, opts.Timeout)
 	if err != nil {
@@ -76,6 +85,7 @@ func parseUsageFlags(args []string) (UsageOptions, error) {
 	fs.SetOutput(io.Discard)
 	opts := UsageOptions{ConfigPath: config.DefaultConfigPath(), Timeout: 10 * time.Second}
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
+	fs.StringVar(&opts.DaemonURL, "daemon-url", opts.DaemonURL, "daemon HTTP(S) origin override")
 	fs.StringVar(&opts.Host, "host", opts.Host, "daemon listen host override")
 	fs.IntVar(&opts.Port, "port", opts.Port, "daemon listen port override")
 	fs.BoolVar(&opts.JSON, "json", false, "print raw schema v2 usage JSON")
@@ -87,6 +97,16 @@ func parseUsageFlags(args []string) (UsageOptions, error) {
 	if fs.NArg() > 0 {
 		return opts, fmt.Errorf("unexpected usage arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "daemon-url":
+			opts.DaemonURLSet = true
+		case "host":
+			opts.HostSet = true
+		case "port":
+			opts.PortSet = true
+		}
+	})
 	return opts, nil
 }
 
@@ -115,23 +135,16 @@ func userConfigPath() (string, bool) {
 }
 
 func FetchUsageFromDaemon(ctx context.Context, cfg config.Config, timeout time.Duration) (model.Usage, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	u := url.URL{Scheme: "http", Host: net.JoinHostPort(clientHost(cfg.Server.Host), fmt.Sprint(cfg.Server.Port)), Path: "/v1/usage"}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	resolution, err := clientpolicy.Resolve(cfg, clientpolicy.FlagOptions{})
 	if err != nil {
 		return model.Usage{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return model.Usage{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return model.Usage{}, fmt.Errorf("GET %s returned HTTP %d", u.String(), resp.StatusCode)
-	}
+	return fetchUsageFromDaemon(ctx, daemonClient{origin: resolution.Origin, timeout: timeout})
+}
+
+func fetchUsageFromDaemon(ctx context.Context, client daemonClient) (model.Usage, error) {
 	var usage model.Usage
-	if err := json.NewDecoder(resp.Body).Decode(&usage); err != nil {
+	if err := client.get(ctx, "/v1/usage", nil, &usage); err != nil {
 		return model.Usage{}, err
 	}
 	if usage.SchemaVersion != 2 || usage.Service != "usagent" {
@@ -370,15 +383,4 @@ func formatNumber(v float64) string {
 		return fmt.Sprintf("%.0f", v)
 	}
 	return fmt.Sprintf("%.2f", v)
-}
-
-func clientHost(host string) string {
-	switch host {
-	case "", "0.0.0.0":
-		return "127.0.0.1"
-	case "::", "[::]":
-		return "::1"
-	default:
-		return host
-	}
 }

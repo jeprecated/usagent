@@ -31,36 +31,40 @@ func run(args []string) error {
 }
 
 func runWithIO(args []string, stdout, stderr io.Writer) error {
+	return runWithContext(context.Background(), args, stdout, stderr)
+}
+
+func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return cli.RunUsage(context.Background(), nil, stdout, stderr)
+		return cli.RunUsage(ctx, nil, stdout, stderr)
 	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "usage", "status":
 			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
+				fmt.Fprint(stdout, "usagent usage [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
 				return nil
 			}
-			return cli.RunUsage(context.Background(), args[1:], stdout, stderr)
+			return cli.RunUsage(ctx, args[1:], stdout, stderr)
 		case "expiring-usage", "expiring":
 			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent expiring-usage [--config PATH] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s] [--within 24h] [--within-ms N] [--minimum-remaining-percent N] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex] [--include-low-confidence]\n")
+				fmt.Fprint(stdout, "usagent expiring-usage [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s] [--within 24h] [--within-ms N] [--minimum-remaining-percent N] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex] [--include-low-confidence]\n")
 				return nil
 			}
-			return cli.RunExpiringUsage(context.Background(), args[1:], stdout, stderr)
+			return cli.RunExpiringUsage(ctx, args[1:], stdout, stderr)
 		case "mcp":
 			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent mcp [--config PATH] [--host HOST] [--port PORT] [--timeout 10s] [--offline]\n")
+				fmt.Fprint(stdout, "usagent mcp [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--timeout 10s] [--offline]\n")
 				return nil
 			}
-			return mcp.Run(context.Background(), args[1:], os.Stdin, stdout, stderr)
+			return mcp.Run(ctx, args[1:], os.Stdin, stdout, stderr)
 		case "serve":
 			args = args[1:]
 		case "help", "-h", "--help":
-			fmt.Fprint(stdout, "usagent usage: usagent [usage] [--config PATH] [--json] [--offline] [--timeout 10s]\n              usagent expiring-usage [--config PATH] [--json] [--offline] [--within 24h] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex]\n              usagent mcp [--config PATH] [--host HOST] [--port PORT]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
+			fmt.Fprint(stdout, "usagent usage: usagent [usage|status] [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n              usagent expiring-usage|expiring [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--within 24h] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex]\n              usagent mcp [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--timeout 10s] [--offline]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
 			return nil
 		default:
-			return cli.RunUsage(context.Background(), args, stdout, stderr)
+			return cli.RunUsage(ctx, args, stdout, stderr)
 		}
 	}
 	opts, err := config.ParseFlags(args)
@@ -76,7 +80,7 @@ func runWithIO(args []string, stdout, stderr io.Writer) error {
 	if err := a.LoadState(); err != nil {
 		logger.Warn("state load failed", "error", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go a.RunRefreshLoop(ctx)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

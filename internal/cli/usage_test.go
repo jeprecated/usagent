@@ -124,16 +124,16 @@ func TestRunUsageTriesUserDaemonConfigBeforeLocalFallback(t *testing.T) {
 		fmt.Fprint(w, `{"schemaVersion":2,"service":"usagent","generatedAt":1,"startedAt":1,"stale":false,"providers":[{"id":"daemon","label":"Daemon","state":"fresh","source":"pull"}],"quotaItems":[{"id":"daemon-session","provider":"daemon","label":"Daemon session","window":{"id":"session","label":"S","kind":"rolling"},"unit":"percent","limit":100,"used":1,"remaining":99,"percentUsed":1,"state":"fresh","severity":"ok","visible":true}]}`)
 	}))
 	defer srv.Close()
-	host, port := splitServer(t, srv.URL)
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	userConfigPath := filepath.Join(dir, "usagent", "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(userConfigPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(userConfigPath, []byte(fmt.Sprintf(`server: {host: %q, port: %d, readAuth: {mode: none}}
+	if err := os.WriteFile(userConfigPath, []byte(fmt.Sprintf(`server: {host: "127.0.0.1", port: 1, readAuth: {mode: none}}
+client: {url: %q, mode: local-only}
 usageView: {providers: [daemon]}
-`, host, port)), 0o644); err != nil {
+`, srv.URL)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	primaryConfigPath := filepath.Join(dir, "bad.yaml")

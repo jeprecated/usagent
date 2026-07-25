@@ -14,20 +14,37 @@ import (
 	"time"
 
 	"github.com/jeprecated/usagent/internal/cli"
+	"github.com/jeprecated/usagent/internal/clientpolicy"
 	"github.com/jeprecated/usagent/internal/config"
 )
 
 type Options struct {
-	ConfigPath string
-	Host       string
-	Port       int
-	Timeout    time.Duration
-	Offline    bool
+	ConfigPath   string
+	DaemonURL    string
+	DaemonURLSet bool
+	Host         string
+	HostSet      bool
+	Port         int
+	PortSet      bool
+	Timeout      time.Duration
+	Offline      bool
+}
+
+func (opts Options) policyFlags() clientpolicy.FlagOptions {
+	return clientpolicy.FlagOptions{
+		DaemonURL: opts.DaemonURL, DaemonURLSet: opts.DaemonURLSet,
+		Host: opts.Host, HostSet: opts.HostSet,
+		Port: opts.Port, PortSet: opts.PortSet,
+		Offline: opts.Offline,
+	}
 }
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	opts, err := parseFlags(args)
 	if err != nil {
+		return err
+	}
+	if err := validateStartupPolicy(opts); err != nil {
 		return err
 	}
 	server := &server{opts: opts, in: bufio.NewReader(stdin), out: stdout, stderr: stderr}
@@ -39,6 +56,7 @@ func parseFlags(args []string) (Options, error) {
 	fs.SetOutput(io.Discard)
 	opts := Options{ConfigPath: config.DefaultConfigPath(), Timeout: 10 * time.Second}
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
+	fs.StringVar(&opts.DaemonURL, "daemon-url", opts.DaemonURL, "daemon HTTP(S) origin override")
 	fs.StringVar(&opts.Host, "host", opts.Host, "daemon listen host override")
 	fs.IntVar(&opts.Port, "port", opts.Port, "daemon listen port override")
 	fs.DurationVar(&opts.Timeout, "timeout", opts.Timeout, "daemon/local refresh timeout")
@@ -49,7 +67,30 @@ func parseFlags(args []string) (Options, error) {
 	if fs.NArg() > 0 {
 		return opts, fmt.Errorf("unexpected mcp arguments: %s", strings.Join(fs.Args(), " "))
 	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "daemon-url":
+			opts.DaemonURLSet = true
+		case "host":
+			opts.HostSet = true
+		case "port":
+			opts.PortSet = true
+		}
+	})
 	return opts, nil
+}
+
+// validateStartupPolicy rejects policy conflicts that can be proven from the
+// current config before stdio serving begins. A config-load failure is kept
+// lazy for backward compatibility: each tool call still loads the config and
+// reports the authoritative error, including if the file changes meanwhile.
+func validateStartupPolicy(opts Options) error {
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	_, err = clientpolicy.Resolve(cfg, opts.policyFlags())
+	return err
 }
 
 type server struct {
@@ -146,18 +187,18 @@ func tools() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "usage",
-			"description": "Return current provider quota/usage for agent backends. Uses the running usagent daemon when reachable, with the same local fallback behavior as the CLI.",
+			"description": "Return current provider quota/usage for agent backends using the configured client policy. require-daemon never falls back to local provider polling.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"json":    map[string]any{"type": "boolean", "description": "Return raw schema v2 JSON instead of the human summary."},
-					"offline": map[string]any{"type": "boolean", "description": "Skip daemon lookup for this call and refresh/read locally."},
+					"offline": map[string]any{"type": "boolean", "description": "Skip daemon lookup and refresh/read locally when policy permits; rejected by require-daemon and when --daemon-url is set."},
 				},
 			},
 		},
 		{
 			"name":        "tokens_to_burn",
-			"description": "Return likely use-it-or-lose-it quota/tokens that may expire unused. This is backed by usagent expiring-usage and prefers a running daemon when reachable.",
+			"description": "Return likely use-it-or-lose-it quota/tokens that may expire unused, using the configured client policy through usagent expiring-usage.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -169,7 +210,7 @@ func tools() []map[string]any {
 					"tags":                    arrayOrStringSchema("Provider/model tags to include."),
 					"includeLowConfidence":    map[string]any{"type": "boolean", "description": "Include low-confidence opportunities."},
 					"json":                    map[string]any{"type": "boolean", "description": "Return raw expiring-usage JSON instead of the human summary."},
-					"offline":                 map[string]any{"type": "boolean", "description": "Skip daemon lookup for this call and refresh/read locally."},
+					"offline":                 map[string]any{"type": "boolean", "description": "Skip daemon lookup and refresh/read locally when policy permits; rejected by require-daemon and when --daemon-url is set."},
 				},
 			},
 		},
@@ -255,10 +296,13 @@ func (s *server) callTokensToBurn(ctx context.Context, args map[string]any) (any
 
 func (s *server) baseCLIArgs(args map[string]any) []string {
 	out := []string{"--config", s.opts.ConfigPath, "--timeout", s.opts.Timeout.String()}
-	if s.opts.Host != "" {
+	if s.opts.DaemonURLSet {
+		out = append(out, "--daemon-url", s.opts.DaemonURL)
+	}
+	if s.opts.HostSet {
 		out = append(out, "--host", s.opts.Host)
 	}
-	if s.opts.Port != 0 {
+	if s.opts.PortSet {
 		out = append(out, "--port", strconv.Itoa(s.opts.Port))
 	}
 	if s.opts.Offline || boolArg(args, "offline") {

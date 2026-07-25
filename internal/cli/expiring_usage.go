@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"sort"
@@ -18,13 +16,18 @@ import (
 	"time"
 
 	"github.com/jeprecated/usagent/internal/analysis"
+	"github.com/jeprecated/usagent/internal/clientpolicy"
 	"github.com/jeprecated/usagent/internal/config"
 )
 
 type ExpiringUsageOptions struct {
 	ConfigPath              string
+	DaemonURL               string
+	DaemonURLSet            bool
 	Host                    string
+	HostSet                 bool
 	Port                    int
+	PortSet                 bool
 	JSON                    bool
 	Offline                 bool
 	Timeout                 time.Duration
@@ -37,12 +40,21 @@ type ExpiringUsageOptions struct {
 	IncludeLowConfidence    bool
 }
 
+func (opts ExpiringUsageOptions) policyFlags() clientpolicy.FlagOptions {
+	return clientpolicy.FlagOptions{
+		DaemonURL: opts.DaemonURL, DaemonURLSet: opts.DaemonURLSet,
+		Host: opts.Host, HostSet: opts.HostSet,
+		Port: opts.Port, PortSet: opts.PortSet,
+		Offline: opts.Offline,
+	}
+}
+
 func RunExpiringUsage(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	opts, err := parseExpiringUsageFlags(args)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.LoadWithOverrides(opts.ConfigPath, config.CLIOptions{ConfigPath: opts.ConfigPath, Host: opts.Host, Port: opts.Port})
+	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return err
 	}
@@ -50,21 +62,20 @@ func RunExpiringUsage(ctx context.Context, args []string, stdout io.Writer, stde
 		opts.Timeout = 10 * time.Second
 	}
 
-	if !opts.Offline {
-		res, err := FetchExpiringUsageFromDaemon(ctx, cfg, opts)
-		if err == nil {
-			return writeExpiringUsage(stdout, res, opts.JSON)
-		}
-		primaryErr := err
-		if fallback, ok := loadUserDaemonConfig(opts.ConfigPath); ok {
-			res, err = FetchExpiringUsageFromDaemon(ctx, fallback, opts)
-			if err == nil {
-				return writeExpiringUsage(stdout, res, opts.JSON)
-			}
-		}
-		if stderr != nil {
-			_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, deriving expiring usage locally: %v\n", primaryErr)
-		}
+	var res analysis.ExpiringUsageResponse
+	access, err := accessDaemon(ctx, cfg, opts.ConfigPath, opts.policyFlags(), opts.Timeout, func(client daemonClient) error {
+		var requestErr error
+		res, requestErr = fetchExpiringUsageFromDaemon(ctx, client, opts)
+		return requestErr
+	})
+	if err != nil {
+		return err
+	}
+	if !access.useLocal {
+		return writeExpiringUsage(stdout, res, opts.JSON)
+	}
+	if access.diagnostic != nil && stderr != nil {
+		_, _ = fmt.Fprintf(stderr, "usagent daemon unavailable, deriving expiring usage locally: %v\n", access.diagnostic)
 	}
 
 	usage, rates, err := LocalUsageAndBurnRates(ctx, cfg, opts.Timeout)
@@ -74,7 +85,7 @@ func RunExpiringUsage(ctx context.Context, args []string, stdout io.Writer, stde
 	now := time.Now()
 	analysisOpts := opts.analysisOptions(now)
 	analysisOpts.BurnRates = rates
-	res := analysis.ExpiringUsage(usage, analysisOpts)
+	res = analysis.ExpiringUsage(usage, analysisOpts)
 	return writeExpiringUsage(stdout, res, opts.JSON)
 }
 
@@ -86,6 +97,7 @@ func parseExpiringUsageFlags(args []string) (ExpiringUsageOptions, error) {
 	var tiers string
 	var tags string
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to YAML config file")
+	fs.StringVar(&opts.DaemonURL, "daemon-url", opts.DaemonURL, "daemon HTTP(S) origin override")
 	fs.StringVar(&opts.Host, "host", opts.Host, "daemon listen host override")
 	fs.IntVar(&opts.Port, "port", opts.Port, "daemon listen port override")
 	fs.BoolVar(&opts.JSON, "json", false, "print raw expiring usage JSON")
@@ -116,6 +128,16 @@ func parseExpiringUsageFlags(args []string) (ExpiringUsageOptions, error) {
 	opts.Providers = splitProviders(providers)
 	opts.Tiers = splitProviders(tiers)
 	opts.Tags = splitProviders(tags)
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "daemon-url":
+			opts.DaemonURLSet = true
+		case "host":
+			opts.HostSet = true
+		case "port":
+			opts.PortSet = true
+		}
+	})
 	return opts, nil
 }
 
@@ -136,10 +158,15 @@ func splitProviders(raw string) []string {
 }
 
 func FetchExpiringUsageFromDaemon(ctx context.Context, cfg config.Config, opts ExpiringUsageOptions) (analysis.ExpiringUsageResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
-	u := url.URL{Scheme: "http", Host: net.JoinHostPort(clientHost(cfg.Server.Host), fmt.Sprint(cfg.Server.Port)), Path: "/v1/expiring-usage"}
-	q := u.Query()
+	resolution, err := clientpolicy.Resolve(cfg, clientpolicy.FlagOptions{})
+	if err != nil {
+		return analysis.ExpiringUsageResponse{}, err
+	}
+	return fetchExpiringUsageFromDaemon(ctx, daemonClient{origin: resolution.Origin, timeout: opts.Timeout}, opts)
+}
+
+func fetchExpiringUsageFromDaemon(ctx context.Context, client daemonClient, opts ExpiringUsageOptions) (analysis.ExpiringUsageResponse, error) {
+	q := make(url.Values)
 	if opts.Within > 0 {
 		q.Set("within", opts.Within.String())
 	}
@@ -161,22 +188,20 @@ func FetchExpiringUsageFromDaemon(ctx context.Context, cfg config.Config, opts E
 	if opts.IncludeLowConfidence {
 		q.Set("includeLowConfidence", "true")
 	}
-	u.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return analysis.ExpiringUsageResponse{}, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return analysis.ExpiringUsageResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return analysis.ExpiringUsageResponse{}, fmt.Errorf("GET %s returned HTTP %d", u.String(), resp.StatusCode)
-	}
 	var res analysis.ExpiringUsageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := client.get(ctx, "/v1/expiring-usage", q, &res); err != nil {
 		return analysis.ExpiringUsageResponse{}, err
+	}
+	if res.GeneratedAt <= 0 {
+		return analysis.ExpiringUsageResponse{}, errors.New("daemon returned invalid expiring usage response: generatedAt must be positive")
+	}
+	for i, opportunity := range res.Opportunities {
+		if strings.TrimSpace(opportunity.Provider) == "" {
+			return analysis.ExpiringUsageResponse{}, fmt.Errorf("daemon returned invalid expiring usage response: opportunity %d provider must not be empty", i)
+		}
+		if strings.TrimSpace(opportunity.ItemID) == "" {
+			return analysis.ExpiringUsageResponse{}, fmt.Errorf("daemon returned invalid expiring usage response: opportunity %d itemId must not be empty", i)
+		}
 	}
 	if res.Opportunities == nil {
 		res.Opportunities = []analysis.ExpiringUsageOpportunity{}

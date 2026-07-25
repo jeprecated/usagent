@@ -38,6 +38,28 @@ Package layout:
 - `internal/providers/noop` keeps disabled provider metadata stable when requested by `usageView.providers`.
 - `internal/httpapi` exposes the stable HTTP contract.
 
+## Server and client roles
+
+Server listening and client consumption are deliberately separate:
+
+- `server.host` and `server.port` configure where `usagent serve` listens. Server-derived client destinations remain HTTP and map wildcard listen addresses to loopback.
+- `client.url` is an optional absolute HTTP(S) origin used by CLI and MCP clients. It does not change the listen address.
+- `client.mode` affects client commands only. It never disables `serve`, so a central host may serve and require its own local daemon with one config.
+
+The modes are:
+
+- `prefer-daemon` (default): read from the selected daemon first, then preserve compatible alternate-user-config and local refresh fallback behavior.
+- `require-daemon`: fail closed on daemon or response failure and never try an alternate daemon or local provider/state/history paths.
+- `local-only`: skip daemon access and use the local refresh/read path.
+
+Destination precedence is explicit `--daemon-url`, explicit legacy `--host`/`--port`, `client.url`, then an HTTP origin derived from `server`. The resolver receives raw flag presence separately from normalized config so it can distinguish a real legacy override. Supplying either legacy flag selects legacy derivation wholesale; an omitted host or port comes from `server`, never from `client.url`. `--daemon-url` conflicts with legacy host/port, `--offline`, and `local-only`. It requires a loadable config because client mode remains configuration policy. An explicit daemon URL under `prefer-daemon` suppresses alternate-daemon lookup but still permits local fallback after failure.
+
+A one-poller/many-reader topology puts provider credentials and refresh scheduling on one private central daemon. Local and remote CLI/MCP processes use `require-daemon`, so they read the daemon cache without creating duplicate provider traffic. A pure client should additionally disable every provider as defense in depth against accidentally starting `serve`. Intended config-file presence is part of the deployment's fail-closed contract: without `--config`, `USAGENT_CONFIG`, or an existing XDG user config, the current fallback is the CWD-relative `config.example.yaml`.
+
+The security boundary for this design is a Tailnet or equivalent private network. Read authentication remains `none`-only. Plain HTTP must remain private; HTTPS can be terminated externally on a private proxy; the service must not be exposed to the internet. Enabling `providers.chatgpt.allowResetConsume` exposes a mutating endpoint and is not suitable for a broadly reachable listener without a later security design.
+
+This topology observes account-scoped usage; it does not reserve quota or prevent concurrent model calls. Host-specific Nix composition, firewall configuration, activation, and deployment are outside this design increment.
+
 ## Provider sources
 
 ### Claude Code / Fable
@@ -59,7 +81,7 @@ The response is normalized as follows:
 - `limits[]` entry with `kind: "weekly_scoped"` and model display/id containing `Fable` → current week, Fable.
 - `extra_usage` with `is_enabled: true` and `monthly_limit` → Extra Credits monthly balance. The endpoint reports `monthly_limit` and `used_credits` in cents, so usagent converts them to the reported currency unit and computes `remaining = (monthly_limit - used_credits) / 100`.
 
-Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks are skipped because they do not expose a finite remaining balance. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses.
+Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks are skipped because they do not expose a finite remaining balance. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses. `usagent` does not refresh the OAuth grant; an external credential owner must update the file.
 
 If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 
@@ -73,7 +95,7 @@ Authorization: Bearer <Codex/ChatGPT OAuth access token>
 ChatGPT-Account-Id: <account id when available>
 ```
 
-By default usagent reads `tokens.access_token` and `tokens.account_id` from `~/.codex/auth.json`, written by the Codex CLI ChatGPT login. The configured `authPath` may instead point to Pi's `~/.pi/agent/auth.json`; usagent reads `openai-codex.access` and `openai-codex.accountId` from that format. `CHATGPT_ACCESS_TOKEN` and `CHATGPT_ACCOUNT_ID` can override either file. The provider reads the file on every request so externally refreshed access tokens are picked up without restarting usagent. It does not expose tokens in responses. The provider normalizes `rate_limit.primary_window` as the session/5h row, `rate_limit.secondary_window` as the weekly row, any `additional_rate_limits[]` windows as model-specific rows, and `rate_limit_reset_credits.available_count` as a reset-credit count.
+By default usagent reads `tokens.access_token` and `tokens.account_id` from `~/.codex/auth.json`, written by the Codex CLI ChatGPT login. The configured `authPath` may instead point to Pi's `~/.pi/agent/auth.json`; usagent reads `openai-codex.access` and `openai-codex.accountId` from that format. `CHATGPT_ACCESS_TOKEN` and `CHATGPT_ACCOUNT_ID` can override either file. The provider reads the file on every request so externally refreshed access tokens are picked up without restarting usagent, but it does not refresh OAuth grants itself. It does not expose tokens in responses. The provider normalizes `rate_limit.primary_window` as the session/5h row, `rate_limit.secondary_window` as the weekly row, any `additional_rate_limits[]` windows as model-specific rows, and `rate_limit_reset_credits.available_count` as a reset-credit count.
 
 Reset banking uses the same credentials. `GET /v1/chatgpt/reset-credits` fetches `GET /backend-api/wham/rate-limit-reset-credits` and returns banked credit IDs/status/grant/expiry metadata. `POST /v1/chatgpt/reset-credits/consume` calls `POST /backend-api/wham/rate-limit-reset-credits/consume` with a `credit_id` and generated/requested `redeem_request_id`. The consume endpoint is disabled by default, requires `providers.chatgpt.allowResetConsume=true`, and requires both `x-usagent-action: consume-chatgpt-reset-credit` and body `confirm: "consume-chatgpt-reset-credit"`. See [`CHATGPT_RESET_CREDITS.md`](CHATGPT_RESET_CREDITS.md) for source references, request/response examples, and service-to-service guidance.
 

@@ -27,7 +27,7 @@ go run ./cmd/usagent mcp --config config.example.yaml
 
 ## CLI usage summary
 
-`usagent` or `usagent usage` prints remaining quota for all providers in the configured usage view. It first calls the running daemon's `/v1/usage` endpoint; if the daemon is unavailable, it loads the same config/state and refreshes due providers locally. Use `usagent serve` to run the daemon.
+`usagent` or `usagent usage` prints remaining quota for all providers in the configured usage view. With the default `client.mode: prefer-daemon`, it first calls the selected daemon's `/v1/usage` endpoint; if the daemon is unavailable, it may load the same config/state and refresh due providers locally. Use `usagent serve` to run the daemon. See [Central daemon operation](#central-daemon-operation) for fail-closed and local-only policies.
 
 ```sh
 usagent
@@ -36,7 +36,7 @@ usagent usage --json
 usagent usage --offline  # skip daemon lookup and refresh/read locally
 ```
 
-`usagent expiring-usage` (alias `usagent expiring`) prints likely "use it or lose it" opportunities from `/v1/expiring-usage`. Daemon-backed requests are cached-only; if the daemon is unavailable, the CLI falls back to the same local refresh/read path as `usage --offline`.
+`usagent expiring-usage` (alias `usagent expiring`) prints likely "use it or lose it" opportunities from `/v1/expiring-usage`. Daemon-backed requests are cached-only. Under the default `prefer-daemon` policy, an unavailable daemon may fall back to the same local refresh/read path as `usage --offline`; configured client policy governs this behavior. `require-daemon` fails closed, while `local-only` bypasses daemon access.
 
 ```sh
 usagent expiring --within 24h --minimum-remaining-percent 10
@@ -44,7 +44,7 @@ usagent expiring-usage --providers chatgpt,claude-code --tiers high,extra-high -
 usagent expiring-usage --include-low-confidence --json
 ```
 
-`usagent mcp` starts a stdio MCP server for coding agents. It exposes tools for current usage (`usage`) and likely expiring quota/tokens to burn (`tokens_to_burn`). Tool calls prefer the running usagent daemon and fall back to the same local refresh/read path as the CLI when the daemon is unavailable.
+`usagent mcp` starts a stdio MCP server for coding agents. It exposes tools for current usage (`usage`) and likely expiring quota/tokens to burn (`tokens_to_burn`). Under the default `prefer-daemon` policy, tool calls prefer the running daemon and may fall back to the same local refresh/read path as the CLI when it is unavailable; configured client policy governs fallback. `require-daemon` fails closed, while `local-only` bypasses daemon access.
 
 ```sh
 usagent mcp --config ~/.config/usagent/config.yaml
@@ -55,6 +55,59 @@ Example MCP client entry:
 ```json
 {"mcpServers":{"usagent":{"command":"usagent","args":["mcp","--config","~/.config/usagent/config.yaml"]}}}
 ```
+
+## Central daemon operation
+
+A supported one-poller/many-reader deployment runs one daemon on a private host and makes every CLI and MCP reader require it. For example, Lattice can listen on its Tailnet interface while its own clients use the local listener:
+
+```yaml
+# Lattice: replace the illustrative address with its actual Tailnet IP.
+server:
+  host: "100.64.0.10"
+  port: 8788
+client:
+  url: "http://100.64.0.10:8788"
+  mode: "require-daemon"
+```
+
+`client.mode` controls client commands only; it does not disable `usagent serve`. Thus Lattice can run `usagent serve` and use `usagent usage` or `usagent mcp` against that same daemon with one configuration. Other private hosts, such as Overton, can require Lattice through Tailnet/MagicDNS:
+
+```yaml
+# Overton-style private reader
+client:
+  url: "http://lattice:8788"
+  mode: "require-daemon"
+providers:
+  claudeOAuth: { enabled: false }
+  chatgpt: { enabled: false }
+  openai: { enabled: false }
+  zAi: { enabled: false }
+  custom: []
+```
+
+Disabling every provider on a pure client is defense in depth against accidentally running `serve`; `require-daemon` already prevents client commands from polling locally. Host-specific Nix composition, firewall rules, activation, and live deployment are deliberately deferred to a separate deployment change.
+
+### Client modes and destination selection
+
+- `prefer-daemon` (the default) tries the selected daemon first and retains the legacy alternate-user-config and local refresh fallback behavior.
+- `require-daemon` fails closed: daemon connection, endpoint, or response errors never fall back to another daemon, local state/history, credentials, refresh locks, or provider APIs.
+- `local-only` skips daemon lookup and uses the local refresh/read path.
+
+Client destinations are selected in this order: explicit `--daemon-url`, explicitly supplied legacy `--host`/`--port`, `client.url`, then an HTTP origin derived from `server.host`/`server.port`. The legacy host and port flags remain compatible; supplying either selects legacy derivation wholesale, with any missing half taken from `server`. `--daemon-url` is an HTTP(S) origin override and conflicts with `--host`, `--port`, `--offline`, and `local-only`. It still requires a loadable config because that config supplies the invocation policy. In `prefer-daemon`, an explicit `--daemon-url` suppresses the alternate user-config daemon attempt, but a failure may still fall back locally. `--offline` is rejected by `require-daemon`; otherwise it selects intentional local operation where policy permits.
+
+Treat the intended config file's presence as part of a fail-closed deployment contract and pass `--config` (or set `USAGENT_CONFIG`) explicitly. If neither is supplied and no XDG user config exists, the current fallback is the CWD-relative path `config.example.yaml`; a different working directory may therefore fail to load or load an unintended example file rather than the deployment configuration. MCP process startup intentionally tolerates a config-load failure for backward compatibility, so startup alone does not prove that the intended config loaded. Every MCP tool call reloads the config and returns a tool error if loading fails.
+
+### Private-network security and credentials
+
+This increment relies on a Tailnet or equivalent private network as its security boundary. `server.readAuth.mode` remains `none`-only: plain HTTP must remain private, HTTPS may be terminated by an external private proxy, and `usagent` must not be exposed to the public internet. No bearer authentication or built-in TLS listener is provided.
+
+Keep `providers.chatgpt.allowResetConsume: false` on a broadly reachable central listener. Enabling it exposes a mutating endpoint that spends real reset credits and needs a later security design even though request confirmation is required.
+
+The daemon rereads configured access-token files or environment sources when providers refresh, so externally refreshed access tokens can be picked up. It does **not** refresh OAuth grants or synchronize credentials; Codex, Pi, Claude Code, or another credential owner must refresh the grant and update the configured source.
+
+Upgrade the central daemon before require-daemon clients. During version skew, a client that requests an endpoint the older daemon lacks fails closed under `require-daemon`; it does not compensate by polling providers locally.
+
+Finally, `usagent` observes account-scoped usage. It does not reserve quota, coordinate callers, or prevent simultaneous model requests from consuming the same account limits.
 
 ## Endpoints
 
@@ -84,7 +137,7 @@ Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint usi
 
 ChatGPT Pro/Codex subscription usage is fetched from ChatGPT's private `/backend-api/wham/usage` endpoint when `providers.chatgpt.enabled=true`. By default usagent reads the Codex CLI OAuth login from `~/.codex/auth.json`. The configured `authPath` also accepts Pi's `~/.pi/agent/auth.json` format and reads its `openai-codex` OAuth entry, so Pi users can point usagent at the credentials Pi automatically refreshes. Alternatively set `CHATGPT_ACCESS_TOKEN` and optionally `CHATGPT_ACCOUNT_ID`. Reset banking is represented in normal stats as `chatgpt-rate-limit-reset-credits`; detailed banked reset-credit records are available from `GET /v1/chatgpt/reset-credits`. See [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for source references, response fields, service-to-service examples, and redemption safety notes.
 
-Redeeming a reset credit is intentionally gated. It is disabled unless `providers.chatgpt.allowResetConsume=true`, and callers must use JSON, the confirmation header, and a confirmation body:
+Redeeming a reset credit is intentionally gated. It is disabled unless `providers.chatgpt.allowResetConsume=true`, and callers must use JSON, the confirmation header, and a confirmation body. Because enabling it exposes a mutating endpoint that spends a real credit, keep it false on a broadly reachable central listener until a later security design exists:
 
 ```sh
 curl -fsS -X POST http://127.0.0.1:8788/v1/chatgpt/reset-credits/consume \

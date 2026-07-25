@@ -20,5 +20,8 @@ secrets*.env
 result
 result-*
 
+# Agent orchestration runtime
+.pi-subagents/
+
 # OS/editor
 .DS_Store

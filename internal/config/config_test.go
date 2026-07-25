@@ -15,6 +15,9 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Server.Port != 8787 {
 		t.Fatalf("port=%d", cfg.Server.Port)
 	}
+	if cfg.Client.Mode != ClientModePreferDaemon || cfg.Client.URL != "" {
+		t.Fatalf("client=%+v", cfg.Client)
+	}
 	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" {
 		t.Fatal("missing claude endpoint/user-agent")
 	}
@@ -29,6 +32,92 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	}
 	if cfg.Providers.ZAI.EndpointURL == "" || cfg.Providers.ZAI.TokenEnv != "ZAI_API_KEY" {
 		t.Fatalf("zai=%+v", cfg.Providers.ZAI)
+	}
+}
+
+func TestNormalizeClientModesAndURL(t *testing.T) {
+	for _, mode := range []ClientMode{ClientModePreferDaemon, ClientModeRequireDaemon, ClientModeLocalOnly} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := Default()
+			cfg.Client = ClientConfig{Mode: mode, URL: "https://lattice.example:8788/"}
+			got, err := Normalize(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Client.Mode != mode || got.Client.URL != "https://lattice.example:8788" {
+				t.Fatalf("client=%+v", got.Client)
+			}
+		})
+	}
+
+	cfg := Default()
+	cfg.Client = ClientConfig{}
+	got, err := Normalize(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Client.Mode != ClientModePreferDaemon || got.Client.URL != "" {
+		t.Fatalf("default client=%+v", got.Client)
+	}
+
+	cfg.Client.Mode = "hybrid"
+	if _, err := Normalize(cfg); err == nil || !strings.Contains(err.Error(), "client.mode") {
+		t.Fatalf("invalid mode error=%v", err)
+	}
+}
+
+func TestNormalizeClientURLValidation(t *testing.T) {
+	valid := map[string]string{
+		"http://127.0.0.1:8787": "http://127.0.0.1:8787",
+		"https://lattice:8788/": "https://lattice:8788",
+		"http://[::1]:8788/":    "http://[::1]:8788",
+	}
+	for input, want := range valid {
+		t.Run("valid_"+strings.ReplaceAll(input, "/", "_"), func(t *testing.T) {
+			got, err := NormalizeClientURL(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("NormalizeClientURL(%q)=%q want %q", input, got, want)
+			}
+		})
+	}
+
+	invalid := []string{
+		"lattice:8788",
+		"ftp://lattice:8788",
+		"http://",
+		"http:///missing-host",
+		"http://user:secret@lattice:8788",
+		"http://lattice:8788?view=usage",
+		"http://lattice:8788?",
+		"http://lattice:8788#usage",
+		"http://lattice:8788#",
+		"http://lattice:8788/v1",
+	}
+	for _, input := range invalid {
+		t.Run("invalid_"+strings.ReplaceAll(input, "/", "_"), func(t *testing.T) {
+			if got, err := NormalizeClientURL(input); err == nil {
+				t.Fatalf("NormalizeClientURL(%q)=%q, want error", input, got)
+			}
+		})
+	}
+}
+
+func TestNormalizeClientURLIsIdempotent(t *testing.T) {
+	cfg := Default()
+	cfg.Client.URL = "https://[::1]:8788/"
+	first, err := Normalize(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Normalize(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Client != second.Client {
+		t.Fatalf("first=%+v second=%+v", first.Client, second.Client)
 	}
 }
 

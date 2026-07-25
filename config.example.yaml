@@ -1,9 +1,17 @@
 server:
   host: "0.0.0.0"
   port: 8787
+  # readAuth is none-only. Keep plain HTTP listeners private; never internet-expose usagent.
   readAuth:
     mode: "none"
   statePath: "%STATE%/usagent/snapshot.json"
+
+client:
+  # Leave url empty to use the local daemon derived from server.host/server.port.
+  # Set an absolute HTTP(S) origin such as private Tailnet/MagicDNS "http://lattice:8788".
+  # require-daemon fails closed and never refreshes providers locally.
+  url: ""
+  mode: "prefer-daemon" # prefer-daemon | require-daemon | local-only
 
 providers:
   claudeOAuth:
@@ -31,7 +39,8 @@ providers:
     endpointUrl: "https://chatgpt.com/backend-api/wham/usage"
     resetCreditsEndpointUrl: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
     resetConsumeEndpointUrl: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
-    # Mutating API endpoint remains disabled unless explicitly enabled.
+    # Mutating API endpoint remains disabled unless explicitly enabled. Keep this false
+    # on broadly reachable central listeners pending a later security design.
     allowResetConsume: false
     tokenEnv: "CHATGPT_ACCESS_TOKEN"
     accountIdEnv: "CHATGPT_ACCOUNT_ID"

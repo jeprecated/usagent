@@ -24,9 +24,23 @@ const (
 
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
+	Client    ClientConfig    `yaml:"client"`
 	Providers ProvidersConfig `yaml:"providers"`
 	UsageView UsageViewConfig `yaml:"usageView"`
 	Quota     QuotaConfig     `yaml:"quota"`
+}
+
+type ClientMode string
+
+const (
+	ClientModePreferDaemon  ClientMode = "prefer-daemon"
+	ClientModeRequireDaemon ClientMode = "require-daemon"
+	ClientModeLocalOnly     ClientMode = "local-only"
+)
+
+type ClientConfig struct {
+	URL  string     `yaml:"url"`
+	Mode ClientMode `yaml:"mode"`
 }
 
 type ServerConfig struct {
@@ -212,6 +226,7 @@ type CLIOptions struct {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{Host: "127.0.0.1", Port: 8787, ReadAuth: ReadAuth{Mode: "none"}, StatePath: "%STATE%/usagent/snapshot.json"},
+		Client: ClientConfig{Mode: ClientModePreferDaemon},
 		Providers: ProvidersConfig{
 			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", BetaHeader: "oauth-2025-04-20"},
 			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
@@ -283,6 +298,19 @@ func Normalize(cfg Config) (Config, error) {
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		return cfg, fmt.Errorf("server.port must be 1..65535")
 	}
+	if cfg.Client.Mode == "" {
+		cfg.Client.Mode = ClientModePreferDaemon
+	}
+	switch cfg.Client.Mode {
+	case ClientModePreferDaemon, ClientModeRequireDaemon, ClientModeLocalOnly:
+	default:
+		return cfg, fmt.Errorf("client.mode must be one of %q, %q, or %q", ClientModePreferDaemon, ClientModeRequireDaemon, ClientModeLocalOnly)
+	}
+	var err error
+	cfg.Client.URL, err = NormalizeClientURL(cfg.Client.URL)
+	if err != nil {
+		return cfg, err
+	}
 	if cfg.Server.ReadAuth.Mode == "" {
 		cfg.Server.ReadAuth.Mode = "none"
 	}
@@ -300,7 +328,6 @@ func Normalize(cfg Config) (Config, error) {
 	if cfg.Server.StatePath == "" {
 		cfg.Server.StatePath = "%STATE%/usagent/snapshot.json"
 	}
-	var err error
 	cfg.Server.StatePath, err = ExpandRuntimePath(cfg.Server.StatePath)
 	if err != nil {
 		return cfg, err

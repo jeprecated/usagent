@@ -38,6 +38,31 @@ func TestFetchExpiringUsageFromDaemonPassesQueryParams(t *testing.T) {
 	}
 }
 
+func TestFetchExpiringUsageFromDaemonRejectsStructurallyInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "missing generatedAt", body: `{}`, want: "generatedAt must be positive"},
+		{name: "empty provider", body: `{"generatedAt":1,"opportunities":[{"itemId":"item"}]}`, want: "opportunity 0 provider must not be empty"},
+		{name: "empty item ID", body: `{"generatedAt":1,"opportunities":[{"provider":"provider"}]}`, want: "opportunity 0 itemId must not be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, tt.body)
+			}))
+			defer srv.Close()
+			host, port := splitServer(t, srv.URL)
+			_, err := FetchExpiringUsageFromDaemon(context.Background(), testConfig(t, host, port), ExpiringUsageOptions{Timeout: time.Second})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v want text %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunExpiringUsageJSONOutputFromDaemon(t *testing.T) {
 	providerCalled := false
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
