@@ -66,8 +66,14 @@ in
           authHeader = "Authorization";
           excludeLimitTypes = [ "TIME_LIMIT" ];
         };
+        providers.cursor = {
+          enabled = false;
+          authPath = "${config.home.homeDirectory}/.config/cursor/auth.json";
+          endpointUrl = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+          tokenEnv = "CURSOR_ACCESS_TOKEN";
+        };
         providers.custom = [];
-        usageView.providers = [ "claude-code" "openai" "z-ai" ];
+        usageView.providers = [ "claude-code" "openai" "z-ai" "cursor" ];
         quota.refreshMs = 300000;
       };
       description = ''

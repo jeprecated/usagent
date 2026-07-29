@@ -21,7 +21,7 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" {
 		t.Fatal("missing claude endpoint/user-agent")
 	}
-	if got := cfg.UsageView.Providers; len(got) != 3 || got[0] != "claude-code" || got[1] != "chatgpt" {
+	if got := cfg.UsageView.Providers; len(got) != 4 || got[0] != "claude-code" || got[1] != "chatgpt" || got[3] != "cursor" {
 		t.Fatalf("providers=%v", got)
 	}
 	if cfg.Providers.ChatGPT.AuthPath == "" || cfg.Providers.ChatGPT.EndpointURL == "" || cfg.Providers.ChatGPT.TokenEnv != "CHATGPT_ACCESS_TOKEN" {
@@ -32,6 +32,9 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	}
 	if cfg.Providers.ZAI.EndpointURL == "" || cfg.Providers.ZAI.TokenEnv != "ZAI_API_KEY" {
 		t.Fatalf("zai=%+v", cfg.Providers.ZAI)
+	}
+	if cfg.Providers.Cursor.AuthPath == "" || cfg.Providers.Cursor.EndpointURL == "" || cfg.Providers.Cursor.TokenEnv != "CURSOR_ACCESS_TOKEN" {
+		t.Fatalf("cursor=%+v", cfg.Providers.Cursor)
 	}
 }
 
@@ -249,12 +252,14 @@ func TestNormalizeClampsBuiltInProviderRefreshIntervals(t *testing.T) {
 	cfg.Providers.OpenAI.RefreshMs = 1000
 	cfg.Providers.ZAI.Enabled = true
 	cfg.Providers.ZAI.RefreshMs = 1000
+	cfg.Providers.Cursor.Enabled = true
+	cfg.Providers.Cursor.RefreshMs = 1000
 	cfg, err := Normalize(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Providers.ClaudeOAuth.RefreshMs != MinClaudeOAuthRefreshMs || cfg.Providers.OpenAI.RefreshMs != MinOpenAIRefreshMs || cfg.Providers.ZAI.RefreshMs != MinZAIRefreshMs {
-		t.Fatalf("refreshes claude=%d openai=%d zai=%d", cfg.Providers.ClaudeOAuth.RefreshMs, cfg.Providers.OpenAI.RefreshMs, cfg.Providers.ZAI.RefreshMs)
+	if cfg.Providers.ClaudeOAuth.RefreshMs != MinClaudeOAuthRefreshMs || cfg.Providers.OpenAI.RefreshMs != MinOpenAIRefreshMs || cfg.Providers.ZAI.RefreshMs != MinZAIRefreshMs || cfg.Providers.Cursor.RefreshMs != MinCursorRefreshMs {
+		t.Fatalf("refreshes claude=%d openai=%d zai=%d cursor=%d", cfg.Providers.ClaudeOAuth.RefreshMs, cfg.Providers.OpenAI.RefreshMs, cfg.Providers.ZAI.RefreshMs, cfg.Providers.Cursor.RefreshMs)
 	}
 }
 

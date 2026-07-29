@@ -49,7 +49,7 @@ func TestHTTPContract(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &usage); err != nil {
 		t.Fatal(err)
 	}
-	if usage.SchemaVersion != 2 || usage.Service != "usagent" || len(usage.Providers) != 3 || len(usage.QuotaItems) != 1 {
+	if usage.SchemaVersion != 2 || usage.Service != "usagent" || len(usage.Providers) != 4 || len(usage.QuotaItems) != 1 {
 		t.Fatalf("usage=%+v", usage)
 	}
 }

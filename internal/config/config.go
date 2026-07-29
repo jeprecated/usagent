@@ -20,6 +20,7 @@ const (
 	MinChatGPTRefreshMs     = int64((5 * time.Minute) / time.Millisecond)
 	MinOpenAIRefreshMs      = int64((10 * time.Minute) / time.Millisecond)
 	MinZAIRefreshMs         = int64((5 * time.Minute) / time.Millisecond)
+	MinCursorRefreshMs      = int64((5 * time.Minute) / time.Millisecond)
 )
 
 type Config struct {
@@ -59,6 +60,7 @@ type ProvidersConfig struct {
 	ChatGPT     ChatGPTConfig          `yaml:"chatgpt"`
 	OpenAI      OpenAIConfig           `yaml:"openai"`
 	ZAI         ZAIConfig              `yaml:"zAi"`
+	Cursor      CursorConfig           `yaml:"cursor"`
 	Custom      []CustomProviderConfig `yaml:"custom"`
 }
 
@@ -125,6 +127,16 @@ type ZAIConfig struct {
 	ExcludeLimitTypes []string               `yaml:"excludeLimitTypes"`
 	VisibleLimitTypes []string               `yaml:"visibleLimitTypes"`
 	Metadata          ProviderMetadataConfig `yaml:"metadata"`
+}
+
+type CursorConfig struct {
+	Enabled     bool                   `yaml:"enabled"`
+	AuthPath    string                 `yaml:"authPath"`
+	EndpointURL string                 `yaml:"endpointUrl"`
+	TokenEnv    string                 `yaml:"tokenEnv"`
+	RefreshMs   int64                  `yaml:"refreshMs"`
+	StaleMs     int64                  `yaml:"staleMs"`
+	Metadata    ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type CustomProviderConfig struct {
@@ -232,8 +244,9 @@ func Default() Config {
 			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
 			OpenAI:      OpenAIConfig{Enabled: false, APIKeyEnv: "OPENAI_ADMIN_KEY", BaseURL: "https://api.openai.com"},
 			ZAI:         ZAIConfig{Enabled: false, EndpointURL: "https://api.z.ai/api/monitor/usage/quota/limit", TokenEnv: "ZAI_API_KEY", TokenEnvFallbacks: []string{"GLM_API_KEY"}, AuthScheme: "bearer", AuthHeader: "Authorization", ExcludeLimitTypes: []string{"TIME_LIMIT"}},
+			Cursor:      CursorConfig{Enabled: false, AuthPath: "~/.config/cursor/auth.json", EndpointURL: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", TokenEnv: "CURSOR_ACCESS_TOKEN"},
 		},
-		UsageView: UsageViewConfig{Providers: []string{"claude-code", "chatgpt", "z-ai"}},
+		UsageView: UsageViewConfig{Providers: []string{"claude-code", "chatgpt", "z-ai", "cursor"}},
 		Quota:     QuotaConfig{RefreshMs: int64((5 * time.Minute) / time.Millisecond)},
 	}
 }
@@ -318,7 +331,7 @@ func Normalize(cfg Config) (Config, error) {
 		return cfg, errors.New("only readAuth.mode=none is supported")
 	}
 	if len(cfg.UsageView.Providers) == 0 {
-		cfg.UsageView.Providers = []string{"claude-code", "chatgpt", "z-ai"}
+		cfg.UsageView.Providers = []string{"claude-code", "chatgpt", "z-ai", "cursor"}
 	}
 	if cfg.Quota.RefreshMs <= 0 {
 		cfg.Quota.RefreshMs = int64((5 * time.Minute) / time.Millisecond)
@@ -337,6 +350,10 @@ func Normalize(cfg Config) (Config, error) {
 		return cfg, err
 	}
 	cfg.Providers.ChatGPT.AuthPath, err = ExpandRuntimePath(cfg.Providers.ChatGPT.AuthPath)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Providers.Cursor.AuthPath, err = ExpandRuntimePath(cfg.Providers.Cursor.AuthPath)
 	if err != nil {
 		return cfg, err
 	}
@@ -496,6 +513,23 @@ func normalizeProviderDefaults(cfg Config) Config {
 		cfg.Providers.ZAI.StaleMs = max(cfg.Providers.ZAI.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
 
+	if cfg.Providers.Cursor.AuthPath == "" {
+		cfg.Providers.Cursor.AuthPath = "~/.config/cursor/auth.json"
+	}
+	if cfg.Providers.Cursor.EndpointURL == "" {
+		cfg.Providers.Cursor.EndpointURL = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+	}
+	if cfg.Providers.Cursor.TokenEnv == "" {
+		cfg.Providers.Cursor.TokenEnv = "CURSOR_ACCESS_TOKEN"
+	}
+	if cfg.Providers.Cursor.RefreshMs <= 0 {
+		cfg.Providers.Cursor.RefreshMs = cfg.Quota.RefreshMs
+	}
+	cfg.Providers.Cursor.RefreshMs = max(cfg.Providers.Cursor.RefreshMs, MinCursorRefreshMs)
+	if cfg.Providers.Cursor.StaleMs <= 0 {
+		cfg.Providers.Cursor.StaleMs = max(cfg.Providers.Cursor.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
+	}
+
 	for i := range cfg.Providers.Custom {
 		if cfg.Providers.Custom[i].RefreshMs <= 0 {
 			cfg.Providers.Custom[i].RefreshMs = cfg.Quota.RefreshMs
@@ -520,6 +554,7 @@ func normalizeMetadata(cfg Config) Config {
 	cfg.Providers.ChatGPT.Metadata = normalizeProviderMetadata(cfg.Providers.ChatGPT.Metadata)
 	cfg.Providers.OpenAI.Metadata = normalizeProviderMetadata(cfg.Providers.OpenAI.Metadata)
 	cfg.Providers.ZAI.Metadata = normalizeProviderMetadata(cfg.Providers.ZAI.Metadata)
+	cfg.Providers.Cursor.Metadata = normalizeProviderMetadata(cfg.Providers.Cursor.Metadata)
 	for i := range cfg.Providers.Custom {
 		cfg.Providers.Custom[i].Metadata = normalizeProviderMetadata(cfg.Providers.Custom[i].Metadata)
 	}

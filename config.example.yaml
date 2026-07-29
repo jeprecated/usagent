@@ -81,6 +81,16 @@ providers:
     # TIME_LIMIT/web-search quota is hidden by default.
     excludeLimitTypes: ["TIME_LIMIT"]
 
+  cursor:
+    # Cursor Models is a shared monthly pool for Cursor Grok 4.5 and Composer.
+    # Reads Cursor's local login; alternatively set CURSOR_ACCESS_TOKEN at runtime.
+    enabled: false
+    authPath: "~/.config/cursor/auth.json"
+    endpointUrl: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+    tokenEnv: "CURSOR_ACCESS_TOKEN"
+    refreshMs: 300000
+    staleMs: 900000
+
   custom:
     - id: "my-provider"
       label: "Mine"
@@ -120,7 +130,7 @@ providers:
             visible: true
 
 usageView:
-  providers: ["claude-code", "chatgpt", "z-ai"]
+  providers: ["claude-code", "chatgpt", "z-ai", "cursor"]
   windows: ["session", "weekly", "monthly", "fableWeekly", "extraCredits", "resetCredits"]
   percentMode: "remaining" # remaining | used
   labelStyle: "long" # long | short

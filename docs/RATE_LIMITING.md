@@ -30,6 +30,7 @@ The built-in provider refresh intervals are clamped during config normalization:
 | ChatGPT WHAM usage | 5 minutes | The ChatGPT/Codex usage endpoint is private and account-scoped; it should not be polled per widget render. |
 | OpenAI organization Costs | 10 minutes | The Costs API is an admin/organization endpoint for Platform/API spend and quota changes slowly; OpenAI recommends pacing requests and respecting retry headers. |
 | z.ai quota endpoint | 5 minutes | Public docs list 429 rate-limit/overload errors but no stable reset headers for the quota endpoint. |
+| Cursor dashboard RPC | 5 minutes | The account-scoped Connect RPC is private and must not be polled per widget render. |
 
 Custom providers keep their configured interval because their rate-limit contract is provider-specific, but they still honor `Retry-After` / `Retry-After-Ms` and the no-tight-loop failure rule.
 
@@ -57,6 +58,10 @@ Anthropic's API rate-limit documentation says 429 responses include `retry-after
 ### ChatGPT WHAM usage
 
 ChatGPT Pro/Codex quota is read from undocumented ChatGPT web endpoints using OAuth credentials from the Codex/ChatGPT login. `usagent` respects retry headers and otherwise waits at least the configured refresh interval. The default/minimum ChatGPT refresh is 5 minutes. Reset-credit listing/consumption is documented in [`CHATGPT_RESET_CREDITS.md`](CHATGPT_RESET_CREDITS.md); consumption is mutating, explicitly triggered, and not part of the refresh loop.
+
+### Cursor dashboard usage
+
+Cursor Models/Other Models usage is read from a private, account-scoped dashboard RPC. `usagent` honors retry headers and otherwise waits at least five minutes before another poll. See [`CURSOR_USAGE.md`](CURSOR_USAGE.md).
 
 ### OpenAI Costs
 

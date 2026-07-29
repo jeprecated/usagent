@@ -15,6 +15,7 @@ import (
 	"github.com/jeprecated/usagent/internal/providers"
 	"github.com/jeprecated/usagent/internal/providers/chatgpt"
 	"github.com/jeprecated/usagent/internal/providers/claude"
+	"github.com/jeprecated/usagent/internal/providers/cursor"
 	"github.com/jeprecated/usagent/internal/providers/custom"
 	"github.com/jeprecated/usagent/internal/providers/noop"
 	"github.com/jeprecated/usagent/internal/providers/openai"
@@ -67,6 +68,12 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.ZAI.RefreshMs, StaleMs: cfg.Providers.ZAI.StaleMs}
 		active[p.ID()] = true
 	}
+	if cfg.Providers.Cursor.Enabled {
+		p := cursor.New(cfg.Providers.Cursor)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.Cursor.RefreshMs, StaleMs: cfg.Providers.Cursor.StaleMs}
+		active[p.ID()] = true
+	}
 	for _, cp := range cfg.Providers.Custom {
 		if !cp.Enabled {
 			continue
@@ -104,13 +111,15 @@ func LabelFor(id string) string {
 		return "OpenAI API"
 	case "z-ai":
 		return "z.ai"
+	case "cursor":
+		return "Cursor"
 	default:
 		return id
 	}
 }
 
 func labelsFor(cfg config.Config) map[string]string {
-	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "z-ai": "z.ai"}
+	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "z-ai": "z.ai", "cursor": "Cursor"}
 	for _, cp := range cfg.Providers.Custom {
 		if cp.Label != "" {
 			labels[cp.ID] = cp.Label
@@ -186,6 +195,8 @@ func providerMetadataFor(cfg config.Config, id string) config.ProviderMetadataCo
 		return cfg.Providers.OpenAI.Metadata
 	case "z-ai":
 		return cfg.Providers.ZAI.Metadata
+	case "cursor":
+		return cfg.Providers.Cursor.Metadata
 	default:
 		for _, cp := range cfg.Providers.Custom {
 			if cp.ID == id {

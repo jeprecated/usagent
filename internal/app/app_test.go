@@ -134,13 +134,14 @@ func TestNewWiresEnabledProvidersAndCustomMetadata(t *testing.T) {
 	cfg.Providers.OpenAI.Enabled = true
 	cfg.Providers.OpenAI.Budgets = []config.Budget{{ID: "weekly-usd", Unit: "usd", Limit: 10}}
 	cfg.Providers.ZAI.Enabled = true
+	cfg.Providers.Cursor.Enabled = true
 	cfg.Providers.Custom = []config.CustomProviderConfig{{ID: "mine", Label: "Mine", Enabled: true}}
 	a := New(cfg, nil)
 	ids := map[string]bool{}
 	for _, p := range a.Providers {
 		ids[p.ID()] = true
 	}
-	for _, want := range []string{"chatgpt", "openai", "z-ai", "mine"} {
+	for _, want := range []string{"chatgpt", "openai", "z-ai", "cursor", "mine"} {
 		if !ids[want] {
 			t.Fatalf("provider %s not wired; ids=%v", want, ids)
 		}
