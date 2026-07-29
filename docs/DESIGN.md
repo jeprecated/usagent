@@ -81,7 +81,7 @@ The response is normalized as follows:
 - `limits[]` entry with `kind: "weekly_scoped"` and model display/id containing `Fable` → current week, Fable.
 - `extra_usage` with `is_enabled: true` and `monthly_limit` → Extra Credits monthly balance. The endpoint reports `monthly_limit` and `used_credits` in cents, so usagent converts them to the reported currency unit and computes `remaining = (monthly_limit - used_credits) / 100`.
 
-Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks are skipped because they do not expose a finite remaining balance. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses. `usagent` does not refresh the OAuth grant; an external credential owner must update the file.
+Missing buckets are not fabricated. Disabled or uncapped `extra_usage` blocks are skipped because they do not expose a finite remaining balance. The OAuth access token is read from the configured credentials file for each refresh and is never exposed in responses. If usage returns `401`, `usagent` acquires Claude Code's refresh locks, rereads the credential, exchanges its refresh token when still needed, atomically persists rotated tokens, and retries usage once. Symlinked credentials are updated through their target; the target file and directory must be writable.
 
 If Claude returns an error or rate limit after a previous success, the last cached quota items remain visible with stale/error metadata. `Retry-After` controls the next retry time when present.
 

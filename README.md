@@ -103,7 +103,7 @@ This increment relies on a Tailnet or equivalent private network as its security
 
 Keep `providers.chatgpt.allowResetConsume: false` on a broadly reachable central listener. Enabling it exposes a mutating endpoint that spends real reset credits and needs a later security design even though request confirmation is required.
 
-The daemon rereads configured access-token files or environment sources when providers refresh, so externally refreshed access tokens can be picked up. It does **not** refresh OAuth grants or synchronize credentials; Codex, Pi, Claude Code, or another credential owner must refresh the grant and update the configured source.
+The daemon rereads configured access-token files or environment sources when providers refresh, so externally refreshed access tokens can be picked up. For Claude Code credentials, a usage `401` triggers one refresh-token exchange, an atomic credential-file update, and one retry; the file and its directory must be writable. Other OAuth grants remain owned by Codex, Pi, or their configured credential source.
 
 Upgrade the central daemon before require-daemon clients. During version skew, a client that requests an endpoint the older daemon lacks fails closed under `require-daemon`; it does not compensate by polling providers locally.
 
@@ -133,7 +133,7 @@ See `config.example.yaml`. It is real YAML. Paths beginning with `~` are expande
 
 Secrets must be provided by runtime environment variables or secret files. Do not put tokens in config, Docker images, Nix store paths, or checked-in files.
 
-Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses. When the endpoint includes `extra_usage`, usagent exposes enabled Extra Credits as a monthly currency quota item, converting the API's cent values to dollars/euros/etc.
+Claude Code/Fable usage is fetched from the Claude Code OAuth usage endpoint using the local Claude Code credentials file path from config. The access token is read from `claudeAiOauth.accessToken` at refresh time and is never returned in HTTP responses. On `401`, usagent uses `claudeAiOauth.refreshToken`, coordinates with Claude Code's refresh locks, atomically persists rotated tokens, and retries once. Read-only credential mounts can still report cached usage but cannot auto-refresh. When the endpoint includes `extra_usage`, usagent exposes enabled Extra Credits as a monthly currency quota item, converting the API's cent values to dollars/euros/etc.
 
 ChatGPT Pro/Codex subscription usage is fetched from ChatGPT's private `/backend-api/wham/usage` endpoint when `providers.chatgpt.enabled=true`. By default usagent reads the Codex CLI OAuth login from `~/.codex/auth.json`. The configured `authPath` also accepts Pi's `~/.pi/agent/auth.json` format and reads its `openai-codex` OAuth entry, so Pi users can point usagent at the credentials Pi automatically refreshes. Alternatively set `CHATGPT_ACCESS_TOKEN` and optionally `CHATGPT_ACCOUNT_ID`. Reset banking is represented in normal stats as `chatgpt-rate-limit-reset-credits`; detailed banked reset-credit records are available from `GET /v1/chatgpt/reset-credits`. See [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for source references, response fields, service-to-service examples, and redemption safety notes.
 
