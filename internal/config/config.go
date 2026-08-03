@@ -130,13 +130,14 @@ type ZAIConfig struct {
 }
 
 type CursorConfig struct {
-	Enabled     bool                   `yaml:"enabled"`
-	AuthPath    string                 `yaml:"authPath"`
-	EndpointURL string                 `yaml:"endpointUrl"`
-	TokenEnv    string                 `yaml:"tokenEnv"`
-	RefreshMs   int64                  `yaml:"refreshMs"`
-	StaleMs     int64                  `yaml:"staleMs"`
-	Metadata    ProviderMetadataConfig `yaml:"metadata"`
+	Enabled            bool                   `yaml:"enabled"`
+	AuthPath           string                 `yaml:"authPath"`
+	EndpointURL        string                 `yaml:"endpointUrl"`
+	BalanceEndpointURL string                 `yaml:"balanceEndpointUrl"`
+	TokenEnv           string                 `yaml:"tokenEnv"`
+	RefreshMs          int64                  `yaml:"refreshMs"`
+	StaleMs            int64                  `yaml:"staleMs"`
+	Metadata           ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type CustomProviderConfig struct {
@@ -244,7 +245,7 @@ func Default() Config {
 			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
 			OpenAI:      OpenAIConfig{Enabled: false, APIKeyEnv: "OPENAI_ADMIN_KEY", BaseURL: "https://api.openai.com"},
 			ZAI:         ZAIConfig{Enabled: false, EndpointURL: "https://api.z.ai/api/monitor/usage/quota/limit", TokenEnv: "ZAI_API_KEY", TokenEnvFallbacks: []string{"GLM_API_KEY"}, AuthScheme: "bearer", AuthHeader: "Authorization", ExcludeLimitTypes: []string{"TIME_LIMIT"}},
-			Cursor:      CursorConfig{Enabled: false, AuthPath: "~/.config/cursor/auth.json", EndpointURL: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", TokenEnv: "CURSOR_ACCESS_TOKEN"},
+			Cursor:      CursorConfig{Enabled: false, AuthPath: "~/.config/cursor/auth.json", EndpointURL: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", BalanceEndpointURL: "https://cursor.com/api/auth/stripe", TokenEnv: "CURSOR_ACCESS_TOKEN"},
 		},
 		UsageView: UsageViewConfig{Providers: []string{"claude-code", "chatgpt", "z-ai", "cursor"}},
 		Quota:     QuotaConfig{RefreshMs: int64((5 * time.Minute) / time.Millisecond)},
@@ -518,6 +519,9 @@ func normalizeProviderDefaults(cfg Config) Config {
 	}
 	if cfg.Providers.Cursor.EndpointURL == "" {
 		cfg.Providers.Cursor.EndpointURL = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+	}
+	if cfg.Providers.Cursor.BalanceEndpointURL == "" {
+		cfg.Providers.Cursor.BalanceEndpointURL = "https://cursor.com/api/auth/stripe"
 	}
 	if cfg.Providers.Cursor.TokenEnv == "" {
 		cfg.Providers.Cursor.TokenEnv = "CURSOR_ACCESS_TOKEN"

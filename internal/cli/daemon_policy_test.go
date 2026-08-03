@@ -215,7 +215,7 @@ func TestExplicitDaemonURLSuppressesAlternateDaemonButAllowsLocalFallback(t *tes
 	if explicitCalls.Load() != 1 || alternateCalls.Load() != 0 || providerCalls.Load() != 1 {
 		t.Fatalf("explicit=%d alternate=%d provider=%d", explicitCalls.Load(), alternateCalls.Load(), providerCalls.Load())
 	}
-	if !strings.Contains(stdout.String(), "Mine: W 75 tokens") || !strings.Contains(stderr.String(), "daemon unavailable") {
+	if !strings.Contains(stdout.String(), "Mine") || !strings.Contains(stdout.String(), "75 tokens") || !strings.Contains(stderr.String(), "daemon unavailable") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
@@ -243,7 +243,7 @@ func TestLocalOnlyUsageSkipsDaemonAndRefreshesLocally(t *testing.T) {
 	if daemonCalls.Load() != 0 || providerCalls.Load() != 1 {
 		t.Fatalf("daemon=%d provider=%d", daemonCalls.Load(), providerCalls.Load())
 	}
-	if stderr.Len() != 0 || !strings.Contains(stdout.String(), "Mine: W 75 tokens") {
+	if stderr.Len() != 0 || !strings.Contains(stdout.String(), "Mine") || !strings.Contains(stdout.String(), "75 tokens") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
@@ -271,7 +271,7 @@ func TestPreferDaemonOfflineSkipsDaemonAndRefreshesLocally(t *testing.T) {
 	if daemonCalls.Load() != 0 || providerCalls.Load() != 1 {
 		t.Fatalf("daemon=%d provider=%d", daemonCalls.Load(), providerCalls.Load())
 	}
-	if stderr.Len() != 0 || !strings.Contains(stdout.String(), "Mine: W 75 tokens") {
+	if stderr.Len() != 0 || !strings.Contains(stdout.String(), "Mine") || !strings.Contains(stdout.String(), "75 tokens") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

@@ -242,13 +242,33 @@ func acquireLocalRefreshLock(ctx context.Context, statePath string) (func(), boo
 	}
 }
 
+type usageRow struct {
+	provider   string
+	quota      string
+	window     string
+	remaining  string
+	status     string
+	percent    float64
+	hasPercent bool
+}
+
+type usageWidths struct {
+	provider  int
+	quota     int
+	window    int
+	remaining int
+}
+
 func FormatUsage(usage model.Usage) string {
+	return FormatUsageWithColor(usage, false)
+}
+
+func FormatUsageWithColor(usage model.Usage, color bool) string {
 	itemsByProvider := map[string][]model.QuotaItem{}
 	for _, item := range usage.QuotaItems {
-		if !item.Visible {
-			continue
+		if item.Visible {
+			itemsByProvider[item.Provider] = append(itemsByProvider[item.Provider], item)
 		}
-		itemsByProvider[item.Provider] = append(itemsByProvider[item.Provider], item)
 	}
 	for provider := range itemsByProvider {
 		sort.SliceStable(itemsByProvider[provider], func(i, j int) bool {
@@ -259,40 +279,114 @@ func FormatUsage(usage model.Usage) string {
 			return left.Window.ID < right.Window.ID
 		})
 	}
-	now := usage.GeneratedAt
-	lines := []string{}
+
+	rows := []usageRow{}
 	for _, provider := range usage.Providers {
 		items := itemsByProvider[provider.ID]
-		state := string(provider.State)
-		if state == "" {
-			state = "stale"
-		}
+		providerState := defaultString(string(provider.State), "stale")
 		if len(items) == 0 {
-			suffix := state
+			status := providerState
 			if provider.Error != nil && provider.Error.Message != "" {
-				suffix = state + ": " + provider.Error.Message
+				status += " · " + provider.Error.Message
 			}
-			lines = append(lines, fmt.Sprintf("%s: unavailable [%s]", provider.Label, suffix))
+			rows = append(rows, usageRow{provider: provider.Label, quota: "unavailable", window: "-", remaining: "-", status: status})
 			continue
 		}
-		parts := make([]string, 0, len(items))
-		hasItemState := false
-		for _, item := range items {
-			if item.State != "" && item.State != "fresh" {
-				hasItemState = true
+		for i, item := range items {
+			status := item.State
+			if status == "fresh" {
+				status = ""
 			}
-			parts = append(parts, formatItem(item, now))
+			if status != "" {
+				if age := staleAge(item, usage.GeneratedAt); age != "" {
+					status += " " + age
+				}
+			} else if i == 0 && providerState != "fresh" {
+				status = providerState
+			}
+			if item.Error != nil && item.Error.Message != "" {
+				if status == "" {
+					status = "error"
+				}
+				status += " · " + item.Error.Message
+			}
+			percent, hasPercent := itemRemainingPercent(item)
+			row := usageRow{quota: usageQuotaLabel(provider.Label, item), window: defaultString(item.Window.Label, "-"), remaining: formatRemaining(item), status: status, percent: percent, hasPercent: hasPercent}
+			if i == 0 {
+				row.provider = provider.Label
+			}
+			rows = append(rows, row)
 		}
-		line := fmt.Sprintf("%s: %s", provider.Label, strings.Join(parts, " · "))
-		if state != "fresh" && !hasItemState {
-			line += " [" + state + "]"
-		}
-		lines = append(lines, line)
 	}
-	if len(lines) == 0 {
+	if len(rows) == 0 {
 		return "No providers configured.\n"
 	}
+
+	widths := usageWidths{len("PROVIDER"), len("QUOTA"), len("WINDOW"), len("REMAINING")}
+	for _, row := range rows {
+		widths.provider = max(widths.provider, len(row.provider))
+		widths.quota = max(widths.quota, len(row.quota))
+		widths.window = max(widths.window, len(row.window))
+		widths.remaining = max(widths.remaining, len(row.remaining))
+	}
+	lines := []string{
+		colorize("Usage", ansiBold, color),
+		colorize("remaining quota by provider", ansiDim, color),
+		"",
+		colorize(strings.Join([]string{padRight("PROVIDER", widths.provider), padRight("QUOTA", widths.quota), padRight("WINDOW", widths.window), padLeft("REMAINING", widths.remaining), "STATUS"}, "  "), ansiDim, color),
+	}
+	for _, row := range rows {
+		status := row.status
+		if status != "" {
+			status = colorize(status, statusANSI(status), color)
+		}
+		line := strings.Join([]string{
+			colorize(padRight(row.provider, widths.provider), ansiBold+ansiCyan, color),
+			padRight(row.quota, widths.quota),
+			colorize(padRight(row.window, widths.window), ansiCyan, color),
+			colorize(padLeft(row.remaining, widths.remaining), remainingANSI(row), color),
+			status,
+		}, "  ")
+		lines = append(lines, strings.TrimRight(line, " "))
+	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func usageQuotaLabel(provider string, item model.QuotaItem) string {
+	label := strings.TrimSpace(item.Label)
+	name := strings.Fields(provider)
+	if len(name) > 0 {
+		prefix := name[0] + " "
+		if len(label) >= len(prefix) && strings.EqualFold(label[:len(prefix)], prefix) {
+			label = strings.TrimSpace(label[len(prefix):])
+		}
+	}
+	return defaultString(label, item.ID)
+}
+
+func remainingANSI(row usageRow) string {
+	if !row.hasPercent {
+		return ansiGreen
+	}
+	switch {
+	case row.percent <= 20:
+		return ansiBold + ansiRed
+	case row.percent <= 50:
+		return ansiYellow
+	default:
+		return ansiGreen
+	}
+}
+
+func statusANSI(status string) string {
+	switch {
+	case strings.Contains(strings.ToLower(status), "error"):
+		return ansiRed
+	case status != "":
+		return ansiYellow
+	default:
+		return ansiDim
+	}
 }
 
 func writeUsage(w io.Writer, usage model.Usage, asJSON bool) error {
@@ -301,24 +395,8 @@ func writeUsage(w io.Writer, usage model.Usage, asJSON bool) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(usage)
 	}
-	_, err := io.WriteString(w, FormatUsage(usage))
+	_, err := io.WriteString(w, FormatUsageWithColor(usage, shouldColor(w)))
 	return err
-}
-
-func formatItem(item model.QuotaItem, now int64) string {
-	label := item.Window.Label
-	if label == "" {
-		label = item.Label
-	}
-	value := formatRemaining(item)
-	if item.State != "" && item.State != "fresh" {
-		suffix := item.State
-		if age := staleAge(item, now); age != "" {
-			suffix += " " + age
-		}
-		value += " [" + suffix + "]"
-	}
-	return fmt.Sprintf("%s %s", label, value)
 }
 
 // staleAge renders how long ago a stale item's value was last refreshed as a
@@ -348,15 +426,12 @@ func formatRemaining(item model.QuotaItem) string {
 	remaining := item.Remaining
 	switch strings.ToLower(item.Unit) {
 	case "percent", "%":
-		return fmt.Sprintf("%s remaining", formatNumber(remaining)+"%")
+		return formatNumber(remaining) + "%"
 	case "usd":
-		return fmt.Sprintf("$%s%s remaining", formatNumber(remaining), formatRemainingPercentSuffix(item))
+		return "$" + formatNumber(remaining) + formatRemainingPercentSuffix(item)
 	default:
-		unit := item.Unit
-		if unit == "" {
-			unit = "units"
-		}
-		return fmt.Sprintf("%s %s%s remaining", formatNumber(remaining), unit, formatRemainingPercentSuffix(item))
+		unit := defaultString(item.Unit, "units")
+		return fmt.Sprintf("%s %s%s", formatNumber(remaining), unit, formatRemainingPercentSuffix(item))
 	}
 }
 

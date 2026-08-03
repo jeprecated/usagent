@@ -34,6 +34,18 @@ func runWithIO(args []string, stdout, stderr io.Writer) error {
 	return runWithContext(context.Background(), args, stdout, stderr)
 }
 
+func wantsHelp(args []string) bool {
+	if len(args) > 0 && args[0] == "help" {
+		return true
+	}
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return cli.RunUsage(ctx, nil, stdout, stderr)
@@ -41,28 +53,27 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	if len(args) > 0 {
 		switch args[0] {
 		case "usage", "status":
-			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent usage [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n")
-				return nil
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "usage")
 			}
 			return cli.RunUsage(ctx, args[1:], stdout, stderr)
 		case "expiring-usage", "expiring":
-			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent expiring-usage [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s] [--within 24h] [--within-ms N] [--minimum-remaining-percent N] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex] [--include-low-confidence]\n")
-				return nil
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "expiring")
 			}
 			return cli.RunExpiringUsage(ctx, args[1:], stdout, stderr)
 		case "mcp":
-			if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-				fmt.Fprint(stdout, "usagent mcp [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--timeout 10s] [--offline]\n")
-				return nil
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "mcp")
 			}
 			return mcp.Run(ctx, args[1:], os.Stdin, stdout, stderr)
 		case "serve":
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "serve")
+			}
 			args = args[1:]
 		case "help", "-h", "--help":
-			fmt.Fprint(stdout, "usagent usage: usagent [usage|status] [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--timeout 10s]\n              usagent expiring-usage|expiring [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--json] [--offline] [--within 24h] [--providers a,b,c] [--tiers high,extra-high] [--tags chat,codex]\n              usagent mcp [--config PATH] [--daemon-url URL] [--host HOST] [--port PORT] [--timeout 10s] [--offline]\n              usagent serve [--config PATH] [--host HOST] [--port PORT]\n")
-			return nil
+			return cli.WriteHelp(stdout, "")
 		default:
 			return cli.RunUsage(ctx, args, stdout, stderr)
 		}

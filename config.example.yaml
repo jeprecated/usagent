@@ -87,6 +87,7 @@ providers:
     enabled: false
     authPath: "~/.config/cursor/auth.json"
     endpointUrl: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+    balanceEndpointUrl: "https://cursor.com/api/auth/stripe"
     tokenEnv: "CURSOR_ACCESS_TOKEN"
     refreshMs: 300000
     staleMs: 900000

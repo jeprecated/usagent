@@ -3,12 +3,14 @@ package cursor
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jeprecated/usagent/internal/config"
@@ -76,7 +78,66 @@ func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, 
 	if pl.PlanUsage == nil || pl.PlanUsage.AutoPercentUsed == nil || pl.PlanUsage.APIPercentUsed == nil {
 		return providers.Result{}, errors.New("cursor usage response missing plan usage percentages")
 	}
-	return providers.Result{Items: Normalize(pl)}, nil
+	items := Normalize(pl)
+	if balance, err := p.extraUsageBalance(ctx, token); err == nil && balance > 0 {
+		items = append(items, model.QuotaItem{ID: "cursor-extra-usage-credits", Provider: "cursor", Label: "Cursor extra usage credits", Window: model.Window{ID: "extraCredits", Label: "Extra", Kind: "credit"}, Unit: "usd", Remaining: balance, State: "fresh", Severity: "ok", Visible: true})
+	}
+	return providers.Result{Items: items}, nil
+}
+
+func (p *Provider) extraUsageBalance(ctx context.Context, token string) (float64, error) {
+	if p.cfg.BalanceEndpointURL == "" {
+		return 0, nil
+	}
+	cookie, ok := cursorSessionCookie(token)
+	if !ok {
+		return 0, errors.New("cursor access token has no session subject")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.BalanceEndpointURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.AddCookie(&http.Cookie{Name: "WorkosCursorSessionToken", Value: cookie})
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("cursor balance returned HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		CustomerBalance float64 `json:"customerBalance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, err
+	}
+	return math.Round(math.Max(0, -payload.CustomerBalance)) / 100, nil
+}
+
+func cursorSessionCookie(token string) (string, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	data, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", false
+	}
+	var claims struct {
+		Subject string `json:"sub"`
+	}
+	if json.Unmarshal(data, &claims) != nil || claims.Subject == "" {
+		return "", false
+	}
+	userID := claims.Subject
+	if _, suffix, found := strings.Cut(userID, "|"); found {
+		userID = suffix
+	}
+	if userID == "" {
+		return "", false
+	}
+	return userID + "%3A%3A" + token, true
 }
 
 func (p *Provider) token() (string, error) {

@@ -85,6 +85,17 @@ func TestRootStatusAliasAndClientDestinationHelp(t *testing.T) {
 	}
 }
 
+func TestRootHelpUsesColorWhenForced(t *testing.T) {
+	t.Setenv("CLICOLOR_FORCE", "1")
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "\x1b[") || !strings.Contains(stdout.String(), "Commands:") {
+		t.Fatalf("help=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestServeIsIndependentOfRequireDaemonClientPolicy(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

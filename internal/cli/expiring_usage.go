@@ -249,7 +249,7 @@ func writeExpiringUsage(w io.Writer, res analysis.ExpiringUsageResponse, asJSON 
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	_, err := io.WriteString(w, FormatExpiringUsageWithColor(res, shouldColorExpiringUsage(w)))
+	_, err := io.WriteString(w, FormatExpiringUsageWithColor(res, shouldColor(w)))
 	return err
 }
 
@@ -415,7 +415,7 @@ func formatExpiringAmount(v float64, unit string) string {
 	return formatNumber(v) + " " + unit
 }
 
-func shouldColorExpiringUsage(w io.Writer) bool {
+func shouldColor(w io.Writer) bool {
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return false
 	}

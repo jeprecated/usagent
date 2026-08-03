@@ -25,7 +25,7 @@ func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {
 		{ID: "zai-week", Provider: "z-ai", Label: "z.ai week", Window: model.Window{ID: "week", Label: "W", Kind: "weekly"}, Unit: "M tokens", Limit: 6, Used: 3.06, Remaining: 2.94, PercentUsed: 51, State: "fresh", Visible: true},
 	}}
 	got := FormatUsage(usage)
-	want := "Claude: S 88% remaining\nOpenAI: W $42.50 remaining [stale]\nz.ai: W 2.94 M tokens (49%) remaining\n"
+	want := "Usage\nremaining quota by provider\n\nPROVIDER  QUOTA    WINDOW            REMAINING  STATUS\nClaude    session  S                       88%\nOpenAI    week     W                    $42.50  stale\nz.ai      week     W       2.94 M tokens (49%)\n"
 	if got != want {
 		t.Fatalf("FormatUsage()=\n%s\nwant=\n%s", got, want)
 	}
@@ -34,7 +34,7 @@ func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {
 func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
 	usage := model.Usage{Providers: []model.Provider{{ID: "openai", Label: "OpenAI", State: model.ProviderStateError, Error: &model.ItemError{Message: "openai costs returned HTTP 500"}}}}
 	got := FormatUsage(usage)
-	want := "OpenAI: unavailable [error: openai costs returned HTTP 500]\n"
+	want := "Usage\nremaining quota by provider\n\nPROVIDER  QUOTA        WINDOW  REMAINING  STATUS\nOpenAI    unavailable  -               -  error · openai costs returned HTTP 500\n"
 	if got != want {
 		t.Fatalf("FormatUsage()=%q want %q", got, want)
 	}
@@ -52,9 +52,22 @@ func TestFormatUsageAppendsStalenessAge(t *testing.T) {
 		{ID: "chatgpt-ancient", Provider: "chatgpt", Label: "ChatGPT ancient", Window: model.Window{ID: "ancient", Label: "A", Kind: "weekly"}, Unit: "percent", Limit: 100, Remaining: 50, State: "stale", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: now - 3*day}},
 	}}
 	got := FormatUsage(usage)
-	want := "ChatGPT Pro: A 50% remaining [stale 3d] · Resets 2 credits (100%) remaining [stale] · W 27% remaining [stale 58m] · W 100% remaining [stale 18h]\n"
+	want := "Usage\nremaining quota by provider\n\nPROVIDER     QUOTA    WINDOW         REMAINING  STATUS\nChatGPT Pro  ancient  A                    50%  stale 3d\n             resets   Resets  2 credits (100%)  stale\n             5h       W                    27%  stale 58m\n             weekly   W                   100%  stale 18h\n"
 	if got != want {
 		t.Fatalf("FormatUsage()=\n%s\nwant=\n%s", got, want)
+	}
+}
+
+func TestFormatUsageWithColor(t *testing.T) {
+	usage := model.Usage{Providers: []model.Provider{{ID: "claude", Label: "Claude", State: model.ProviderStateFresh}}, QuotaItems: []model.QuotaItem{
+		{ID: "low", Provider: "claude", Label: "Claude low", Window: model.Window{Label: "S"}, Unit: "percent", Limit: 100, Remaining: 10, State: "fresh", Visible: true},
+		{ID: "high", Provider: "claude", Label: "Claude high", Window: model.Window{Label: "W"}, Unit: "percent", Limit: 100, Remaining: 80, State: "fresh", Visible: true},
+	}}
+	got := FormatUsageWithColor(usage, true)
+	for _, want := range []string{"\x1b[", ansiRed, ansiGreen, "PROVIDER", "low", "high"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("colored usage missing %q: %q", want, got)
+		}
 	}
 }
 
@@ -147,7 +160,7 @@ usageView: {providers: [bad]}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); got != "Daemon: S 99% remaining\n" {
+	if got := stdout.String(); !strings.Contains(got, "Daemon") || !strings.Contains(got, "99%") {
 		t.Fatalf("stdout=%q stderr=%q", got, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -200,7 +213,7 @@ quota:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); got != "Mine: W 75 tokens (75%) remaining\n" {
+	if got := stdout.String(); !strings.Contains(got, "Mine") || !strings.Contains(got, "75 tokens (75%)") {
 		t.Fatalf("stdout=%q stderr=%q", got, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "daemon unavailable") {

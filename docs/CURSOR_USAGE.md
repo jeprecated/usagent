@@ -14,7 +14,9 @@ Connect-Protocol-Version: 1
 
 The response supplies the billing-cycle end and `planUsage.autoPercentUsed` / `planUsage.apiPercentUsed`. They are normalized as `cursor-models` and `cursor-other-models` percentage quota items. The Cursor Models response identifies the supported Grok 4.5 model IDs but has no per-model usage breakdown.
 
-By default, the provider rereads `~/.config/cursor/auth.json` and uses its `accessToken`; `CURSOR_ACCESS_TOKEN` overrides it. Cursor owns refresh-token rotation, so a refreshed login is picked up on the next poll. The RPC is private and may change; keep polling at the configured five-minute minimum.
+`usagent` also reads Cursor's prepaid extra-usage balance from `GET https://cursor.com/api/auth/stripe`. A negative Stripe `customerBalance` is account credit and appears as the unbounded `cursor-extra-usage-credits` USD item. Failure of this optional request does not hide the monthly usage pools.
+
+By default, the provider rereads `~/.config/cursor/auth.json` and uses its `accessToken`; `CURSOR_ACCESS_TOKEN` overrides it. Cursor owns refresh-token rotation, so a refreshed login is picked up on the next poll. Both APIs are private and may change; keep polling at the configured five-minute minimum.
 
 Sources:
 

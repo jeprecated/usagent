@@ -33,7 +33,7 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Providers.ZAI.EndpointURL == "" || cfg.Providers.ZAI.TokenEnv != "ZAI_API_KEY" {
 		t.Fatalf("zai=%+v", cfg.Providers.ZAI)
 	}
-	if cfg.Providers.Cursor.AuthPath == "" || cfg.Providers.Cursor.EndpointURL == "" || cfg.Providers.Cursor.TokenEnv != "CURSOR_ACCESS_TOKEN" {
+	if cfg.Providers.Cursor.AuthPath == "" || cfg.Providers.Cursor.EndpointURL == "" || cfg.Providers.Cursor.BalanceEndpointURL == "" || cfg.Providers.Cursor.TokenEnv != "CURSOR_ACCESS_TOKEN" {
 		t.Fatalf("cursor=%+v", cfg.Providers.Cursor)
 	}
 }
