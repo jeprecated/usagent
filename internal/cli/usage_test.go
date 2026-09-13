@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,79 @@ func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
 	want := "Usage\nremaining quota by provider\n\nPROVIDER  QUOTA        WINDOW  REMAINING  STATUS\nOpenAI    unavailable  -               -  error · openai costs returned HTTP 500\n"
 	if got != want {
 		t.Fatalf("FormatUsage()=%q want %q", got, want)
+	}
+}
+
+func TestFormatUsageSummarizesCursorAuthenticationError(t *testing.T) {
+	const now int64 = 1_784_972_820_779
+	itemError := &model.ItemError{Code: "refresh_failed", Message: `cursor usage returned HTTP 401: {"code":"unauthenticated","details":[{"debug":{"error":"ERROR_NOT_LOGGED_IN"},"value":"opaque-payload"}]}`}
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%v", cached), func(t *testing.T) {
+			usage := model.Usage{GeneratedAt: now, Providers: []model.Provider{{ID: "cursor", Label: "Cursor", State: model.ProviderStateError, Error: itemError}}}
+			if cached {
+				for _, label := range []string{"Models", "Other Models"} {
+					usage.QuotaItems = append(usage.QuotaItems, model.QuotaItem{
+						ID: label, Provider: "cursor", Label: label, Window: model.Window{Label: "M"},
+						Unit: "percent", Remaining: 96.47, State: "stale", Visible: true,
+						Refresh: &model.Refresh{LastUpdatedAt: now - 5*24*60*60*1000}, Error: itemError,
+					})
+				}
+			}
+			got := FormatUsage(usage)
+			if strings.Count(got, "authentication required; sign in again") != 1 {
+				t.Fatalf("expected one actionable hint: %s", got)
+			}
+			for _, raw := range []string{"HTTP 401", "unauthenticated", "ERROR_NOT_LOGGED_IN", "opaque-payload"} {
+				if strings.Contains(got, raw) {
+					t.Fatalf("table contains raw diagnostic %q: %s", raw, got)
+				}
+			}
+			if cached && (strings.Count(got, "stale 5d") != 2 || strings.Count(got, "96.47%") != 2) {
+				t.Fatalf("cached values and stale ages must remain visible: %s", got)
+			}
+			var buf bytes.Buffer
+			if err := writeUsage(&buf, usage, true); err != nil {
+				t.Fatal(err)
+			}
+			var decoded model.Usage
+			if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Providers[0].Error.Message != itemError.Message {
+				t.Fatal("JSON must retain the full diagnostic")
+			}
+		})
+	}
+}
+
+func TestUsageErrorSummary(t *testing.T) {
+	for _, tt := range []struct{ message, want string }{
+		{"", ""},
+		{"cursor usage returned HTTP 401", "authentication required; sign in again"},
+		{"cursor usage returned HTTP 403: forbidden", "cursor usage returned HTTP 403"},
+		{"openai costs returned HTTP 500: {\"error\":\"long response\"}", "openai costs returned HTTP 500"},
+		{"cursor usage returned HTTP 429: slow down", "cursor usage returned HTTP 429"},
+		{"connection failed:\n\ttry later", "connection failed: try later"},
+		{strings.Repeat("界", 120), strings.Repeat("界", 99) + "…"},
+	} {
+		t.Run(tt.message, func(t *testing.T) {
+			if got := usageErrorSummary(&model.ItemError{Message: tt.message}); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+	if got := usageErrorSummary(nil); got != "" {
+		t.Fatalf("nil error summary = %q", got)
+	}
+}
+
+func TestFormatUsageUsesProviderErrorWhenItemsHaveNone(t *testing.T) {
+	usage := model.Usage{
+		Providers:  []model.Provider{{ID: "cursor", Label: "Cursor", State: model.ProviderStateError, Error: &model.ItemError{Message: "cursor usage returned HTTP 401"}}},
+		QuotaItems: []model.QuotaItem{{ID: "models", Provider: "cursor", Label: "Models", State: "stale", Visible: true}},
+	}
+	if got := FormatUsage(usage); !strings.Contains(got, "authentication required; sign in again") {
+		t.Fatalf("missing provider error: %s", got)
 	}
 }
 

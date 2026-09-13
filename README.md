@@ -36,6 +36,8 @@ usagent usage --json
 usagent usage --offline  # skip daemon lookup and refresh/read locally
 ```
 
+The table keeps provider errors short and shows each distinct error once per provider. Authentication failures show `authentication required; sign in again`; cached quotas retain their stale age. Use `usagent usage --json` for full error details.
+
 `usagent expiring-usage` (alias `usagent expiring`) prints likely "use it or lose it" opportunities from `/v1/expiring-usage`. Daemon-backed requests are cached-only. Under the default `prefer-daemon` policy, an unavailable daemon may fall back to the same local refresh/read path as `usage --offline`; configured client policy governs this behavior. `require-daemon` fails closed, while `local-only` bypasses daemon access.
 
 ```sh

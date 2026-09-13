@@ -286,12 +286,13 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 		providerState := defaultString(string(provider.State), "stale")
 		if len(items) == 0 {
 			status := providerState
-			if provider.Error != nil && provider.Error.Message != "" {
-				status += " · " + provider.Error.Message
+			if message := usageErrorSummary(provider.Error); message != "" {
+				status += " · " + message
 			}
 			rows = append(rows, usageRow{provider: provider.Label, quota: "unavailable", window: "-", remaining: "-", status: status})
 			continue
 		}
+		seenErrors := map[string]bool{}
 		for i, item := range items {
 			status := item.State
 			if status == "fresh" {
@@ -304,11 +305,18 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 			} else if i == 0 && providerState != "fresh" {
 				status = providerState
 			}
-			if item.Error != nil && item.Error.Message != "" {
+			itemError := item.Error
+			if itemError == nil {
+				itemError = provider.Error
+			}
+			if message := usageErrorSummary(itemError); message != "" {
 				if status == "" {
 					status = "error"
 				}
-				status += " · " + item.Error.Message
+				if !seenErrors[message] {
+					status += " · " + message
+					seenErrors[message] = true
+				}
 			}
 			percent, hasPercent := itemRemainingPercent(item)
 			row := usageRow{quota: usageQuotaLabel(provider.Label, item), window: defaultString(item.Window.Label, "-"), remaining: formatRemaining(item), status: status, percent: percent, hasPercent: hasPercent}
@@ -350,6 +358,27 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 		lines = append(lines, strings.TrimRight(line, " "))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// Keep the table compact, including errors loaded from older cached snapshots.
+// The original message remains available in --json output.
+func usageErrorSummary(itemError *model.ItemError) string {
+	if itemError == nil {
+		return ""
+	}
+	message := strings.Join(strings.Fields(itemError.Message), " ")
+	if prefix, response, ok := strings.Cut(message, " returned HTTP "); ok {
+		code, _, _ := strings.Cut(response, ":")
+		if code == "401" {
+			return "authentication required; sign in again"
+		}
+		message = prefix + " returned HTTP " + code
+	}
+	const maxLength = 100
+	if runes := []rune(message); len(runes) > maxLength {
+		message = string(runes[:maxLength-1]) + "…"
+	}
+	return message
 }
 
 func usageQuotaLabel(provider string, item model.QuotaItem) string {
