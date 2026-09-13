@@ -168,7 +168,7 @@ providers:
         window: { id: "month", label: "M", kind: "monthly" }
 ```
 
-Anthropic Console/API prepaid credits are separate from Claude subscription extra usage. Enable `providers.anthropic` with a configurable balance/cost checkpoint and a runtime `ANTHROPIC_ADMIN_KEY` (or `apiKeyFile`). The provider uses the organization Cost API to show spending since the checkpoint and **estimated remaining USD**, automatically adding itself to the usage view. No balance is assumed or hard-coded. See [`docs/ANTHROPIC_CREDITS.md`](docs/ANTHROPIC_CREDITS.md) for key setup, capturing the daily-UTC spending baseline without double-counting, and reconciling purchases or credit adjustments.
+Anthropic Console/API prepaid credits are separate from Claude subscription extra usage. Enable `providers.anthropic` only for a real Anthropic organization account with Admin API access; personal/individual Console organizations are not supported. It uses a configurable balance/cost checkpoint and a runtime `ANTHROPIC_ADMIN_KEY` (or `apiKeyFile`) to show spending since the checkpoint and **estimated remaining USD**, automatically adding itself to the usage view. No balance is assumed or hard-coded. See [`docs/ANTHROPIC_CREDITS.md`](docs/ANTHROPIC_CREDITS.md) for key setup, capturing the daily-UTC spending baseline without double-counting, and reconciling purchases or credit adjustments.
 
 z.ai usage is fetched from `GET https://api.z.ai/api/monitor/usage/quota/limit` when `providers.zAi.enabled=true`. Provide `ZAI_API_KEY` (fallback `GLM_API_KEY`) or override auth/header settings for compatible endpoints:
 

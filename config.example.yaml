@@ -70,6 +70,8 @@ providers:
 
   anthropic:
     # Anthropic Console/API prepaid credits, separate from Claude subscriptions.
+    # Supported only for real Anthropic organizations with Admin API access;
+    # personal/individual Console organizations are not supported.
     # See docs/ANTHROPIC_CREDITS.md to capture a matching balance/cost checkpoint.
     enabled: false
     apiKeyEnv: "ANTHROPIC_ADMIN_KEY"

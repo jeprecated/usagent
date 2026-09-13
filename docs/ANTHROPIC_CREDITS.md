@@ -1,10 +1,10 @@
 # Anthropic Console/API credits
 
-`providers.anthropic` estimates prepaid USD credits using Anthropic's organization Cost API. It is separate from `providers.claudeOAuth`, which tracks Claude subscription limits and subscription extra usage. Enabling it automatically adds `anthropic` to the usage view; existing provider order is preserved. Clients that filter windows should allow the `credits` window.
+`providers.anthropic` estimates prepaid USD credits using Anthropic's organization Cost API. It is supported only for **real Anthropic organization accounts with Admin API access**. Personal/individual Console organizations are not supported, even when the Console shows workspaces or an organization-scoped personal key. It is separate from `providers.claudeOAuth`, which tracks Claude subscription limits and subscription extra usage. Enabling it automatically adds `anthropic` to the usage view; existing provider order is preserved. Clients that filter windows should allow the `credits` window.
 
 ## Credentials
 
-Create a dedicated key (for example, named `usagent`) in [Claude Console → Settings → Admin keys](https://platform.claude.com/settings/admin-keys). The key must belong to the **same organization** as the billing balance. Anthropic documents Admin API access as unavailable for individual accounts; ordinary workspace-scoped inference keys do not work here.
+This feature requires a dedicated Anthropic Admin API credential belonging to the **same real organization** as the billing balance. If Claude Console does not provide an Admin keys page for the account, the account is not eligible for this integration. Personal/individual Console organizations and ordinary `sk-ant-api03` inference keys do not work here.
 
 Console Admin keys have broad administrative access, not selectable read-only scopes. Usagent only makes GET cost-report requests, never buys credits or changes billing. Keep the key on the poller host, not on require-daemon readers.
 
