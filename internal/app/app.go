@@ -13,6 +13,7 @@ import (
 	"github.com/jeprecated/usagent/internal/history"
 	"github.com/jeprecated/usagent/internal/model"
 	"github.com/jeprecated/usagent/internal/providers"
+	"github.com/jeprecated/usagent/internal/providers/anthropic"
 	"github.com/jeprecated/usagent/internal/providers/chatgpt"
 	"github.com/jeprecated/usagent/internal/providers/claude"
 	"github.com/jeprecated/usagent/internal/providers/cursor"
@@ -62,6 +63,15 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.OpenAI.RefreshMs, StaleMs: cfg.Providers.OpenAI.StaleMs}
 		active[p.ID()] = true
 	}
+	if cfg.Providers.Anthropic.Enabled {
+		p := anthropic.New(cfg.Providers.Anthropic)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.Anthropic.RefreshMs, StaleMs: cfg.Providers.Anthropic.StaleMs}
+		active[p.ID()] = true
+		if !contains(cfg.UsageView.Providers, p.ID()) {
+			cfg.UsageView.Providers = append(cfg.UsageView.Providers, p.ID())
+		}
+	}
 	if cfg.Providers.ZAI.Enabled {
 		p := zai.New(cfg.Providers.ZAI)
 		ps = append(ps, p)
@@ -109,6 +119,8 @@ func LabelFor(id string) string {
 		return "ChatGPT Pro"
 	case "openai":
 		return "OpenAI API"
+	case "anthropic":
+		return "Anthropic API"
 	case "z-ai":
 		return "z.ai"
 	case "cursor":
@@ -119,7 +131,7 @@ func LabelFor(id string) string {
 }
 
 func labelsFor(cfg config.Config) map[string]string {
-	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "z-ai": "z.ai", "cursor": "Cursor"}
+	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "anthropic": "Anthropic API", "z-ai": "z.ai", "cursor": "Cursor"}
 	for _, cp := range cfg.Providers.Custom {
 		if cp.Label != "" {
 			labels[cp.ID] = cp.Label
@@ -193,6 +205,8 @@ func providerMetadataFor(cfg config.Config, id string) config.ProviderMetadataCo
 		return cfg.Providers.ChatGPT.Metadata
 	case "openai":
 		return cfg.Providers.OpenAI.Metadata
+	case "anthropic":
+		return cfg.Providers.Anthropic.Metadata
 	case "z-ai":
 		return cfg.Providers.ZAI.Metadata
 	case "cursor":

@@ -68,6 +68,22 @@ providers:
         limit: 200
         window: { id: "month", label: "M", kind: "monthly" }
 
+  anthropic:
+    # Anthropic Console/API prepaid credits, separate from Claude subscriptions.
+    # See docs/ANTHROPIC_CREDITS.md to capture a matching balance/cost checkpoint.
+    enabled: false
+    apiKeyEnv: "ANTHROPIC_ADMIN_KEY"
+    # Alternatively read a raw key file at refresh time (takes precedence over env):
+    # apiKeyFile: "~/.config/usagent/anthropic-admin-key"
+    refreshMs: 300000
+    staleMs: 900000
+    # No balance or spending baseline is assumed. All checkpoint fields are required
+    # when enabled. Replace the placeholders with your own values before uncommenting.
+    # checkpoint:
+    #   balanceUSD: <balance at checkpoint>
+    #   reportStart: "<UTC date>T00:00:00Z"
+    #   reportedCostUSD: <total reported USD from reportStart at checkpoint>
+
   zAi:
     # Set enabled true only when ZAI_API_KEY or GLM_API_KEY is available at runtime.
     enabled: false

@@ -60,6 +60,7 @@ type QuotaItem struct {
 	State        string     `json:"state"`
 	Severity     string     `json:"severity"`
 	Visible      bool       `json:"visible"`
+	Estimated    bool       `json:"estimated,omitempty"`
 	ProviderTier string     `json:"providerTier,omitempty"`
 	ProviderTags []string   `json:"providerTags,omitempty"`
 	ModelTier    string     `json:"modelTier,omitempty"`

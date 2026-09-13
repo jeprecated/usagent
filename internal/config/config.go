@@ -59,6 +59,7 @@ type ProvidersConfig struct {
 	ClaudeOAuth ClaudeOAuthConfig      `yaml:"claudeOAuth"`
 	ChatGPT     ChatGPTConfig          `yaml:"chatgpt"`
 	OpenAI      OpenAIConfig           `yaml:"openai"`
+	Anthropic   AnthropicConfig        `yaml:"anthropic"`
 	ZAI         ZAIConfig              `yaml:"zAi"`
 	Cursor      CursorConfig           `yaml:"cursor"`
 	Custom      []CustomProviderConfig `yaml:"custom"`
@@ -339,6 +340,16 @@ func Normalize(cfg Config) (Config, error) {
 	}
 	cfg = normalizeProviderDefaults(cfg)
 	cfg = normalizeMetadata(cfg)
+	cfg.Providers.Anthropic = normalizeAnthropic(cfg.Providers.Anthropic, cfg.Quota.RefreshMs)
+	if cfg.Providers.Anthropic.Enabled {
+		if err := cfg.Providers.Anthropic.Validate(); err != nil {
+			return cfg, err
+		}
+	}
+	cfg.Providers.Anthropic.APIKeyFile, err = ExpandRuntimePath(cfg.Providers.Anthropic.APIKeyFile)
+	if err != nil {
+		return cfg, err
+	}
 	if cfg.Server.StatePath == "" {
 		cfg.Server.StatePath = "%STATE%/usagent/snapshot.json"
 	}
@@ -557,6 +568,7 @@ func normalizeMetadata(cfg Config) Config {
 	cfg.Providers.ClaudeOAuth.Metadata = normalizeProviderMetadata(cfg.Providers.ClaudeOAuth.Metadata)
 	cfg.Providers.ChatGPT.Metadata = normalizeProviderMetadata(cfg.Providers.ChatGPT.Metadata)
 	cfg.Providers.OpenAI.Metadata = normalizeProviderMetadata(cfg.Providers.OpenAI.Metadata)
+	cfg.Providers.Anthropic.Metadata = normalizeProviderMetadata(cfg.Providers.Anthropic.Metadata)
 	cfg.Providers.ZAI.Metadata = normalizeProviderMetadata(cfg.Providers.ZAI.Metadata)
 	cfg.Providers.Cursor.Metadata = normalizeProviderMetadata(cfg.Providers.Cursor.Metadata)
 	for i := range cfg.Providers.Custom {

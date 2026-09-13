@@ -2,7 +2,7 @@
 
 Standalone Go usage/quota microservice for agent providers.
 
-`usagent` refreshes provider usage for Claude Code/Fable, ChatGPT Pro/Codex, optional OpenAI API costs, and z.ai through a cache coordinator, normalizes the current snapshot to schema version 2, and exposes it over HTTP for Noctalia or any other client.
+`usagent` refreshes provider usage for Claude Code/Fable, ChatGPT Pro/Codex, optional OpenAI API costs and Anthropic API credit estimates, and z.ai through a cache coordinator, normalizes the current snapshot to schema version 2, and exposes it over HTTP for Noctalia or any other client.
 
 ## Commands
 
@@ -168,6 +168,8 @@ providers:
         window: { id: "month", label: "M", kind: "monthly" }
 ```
 
+Anthropic Console/API prepaid credits are separate from Claude subscription extra usage. Enable `providers.anthropic` with a configurable balance/cost checkpoint and a runtime `ANTHROPIC_ADMIN_KEY` (or `apiKeyFile`). The provider uses the organization Cost API to show spending since the checkpoint and **estimated remaining USD**, automatically adding itself to the usage view. No balance is assumed or hard-coded. See [`docs/ANTHROPIC_CREDITS.md`](docs/ANTHROPIC_CREDITS.md) for key setup, capturing the daily-UTC spending baseline without double-counting, and reconciling purchases or credit adjustments.
+
 z.ai usage is fetched from `GET https://api.z.ai/api/monitor/usage/quota/limit` when `providers.zAi.enabled=true`. Provide `ZAI_API_KEY` (fallback `GLM_API_KEY`) or override auth/header settings for compatible endpoints:
 
 ```yaml
@@ -282,4 +284,4 @@ The generated YAML lives in the Nix store and must not contain plaintext secrets
 Usage: Claude S:100% W:50% F:24% [2h14m] · ChatGPT S:75% W:40% · z.ai S:90% W:97%
 ```
 
-ChatGPT, OpenAI API costs, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.
+ChatGPT, OpenAI API costs, Anthropic API credit estimates, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.

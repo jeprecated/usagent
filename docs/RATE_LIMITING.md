@@ -29,6 +29,7 @@ The built-in provider refresh intervals are clamped during config normalization:
 | Claude OAuth usage | 15 minutes | The OAuth usage endpoint is account-scoped and has proven sensitive to polling bursts; local/offline fallback also uses a cross-process refresh lock. |
 | ChatGPT WHAM usage | 5 minutes | The ChatGPT/Codex usage endpoint is private and account-scoped; it should not be polled per widget render. |
 | OpenAI organization Costs | 10 minutes | The Costs API is an admin/organization endpoint for Platform/API spend and quota changes slowly; OpenAI recommends pacing requests and respecting retry headers. |
+| Anthropic organization Costs | 5 minutes | Cost reporting typically lags by five minutes; all readers share the cached estimate. |
 | z.ai quota endpoint | 5 minutes | Public docs list 429 rate-limit/overload errors but no stable reset headers for the quota endpoint. |
 | Cursor dashboard RPC | 5 minutes | The account-scoped Connect RPC is private and must not be polled per widget render. |
 
@@ -66,6 +67,10 @@ Cursor Models/Other Models usage is read from a private, account-scoped dashboar
 ### OpenAI Costs
 
 OpenAI documents 429 rate-limit errors and recommends pacing requests, avoiding unnecessary calls, and respecting response headers. The Costs endpoint is queried once per refresh for the widest configured budget range, then weekly/monthly budget rows are derived locally. The default/minimum OpenAI API-cost refresh is 10 minutes.
+
+### Anthropic Costs
+
+Anthropic permits sustained polling once per minute, but usagent uses a five-minute minimum/default to match typical reporting latency. Each refresh follows report pagination across all days since the configured checkpoint, with a 100-page safety limit. It honors Anthropic retry/reset headers and retains the cached estimate as stale on any failure instead of publishing partial totals. See [`ANTHROPIC_CREDITS.md`](ANTHROPIC_CREDITS.md).
 
 ### z.ai quota
 
