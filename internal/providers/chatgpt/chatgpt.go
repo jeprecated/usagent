@@ -22,8 +22,31 @@ import (
 )
 
 type Provider struct {
-	cfg    config.ChatGPTConfig
-	client *http.Client
+	cfg       config.ChatGPTConfig
+	client    *http.Client
+	token     string // Set only on an account-bound, request-scoped copy.
+	accountID string
+}
+
+// BindAccount snapshots credentials so a usage check and subsequent redemption
+// cannot silently switch accounts if an OAuth file changes between requests.
+func (p *Provider) BindAccount(expected string) (*Provider, string, error) {
+	token, account, err := credentials(p.cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	if account == "" {
+		account = accountIDFromJWT(token)
+	}
+	if account == "" {
+		return nil, "", errors.New("chatgpt account ID is required for reset-once")
+	}
+	if expected != "" && account != expected {
+		return nil, "", errors.New("chatgpt account changed; reset-once disarmed")
+	}
+	bound := *p
+	bound.token, bound.accountID = token, account
+	return &bound, account, nil
 }
 
 func New(cfg config.ChatGPTConfig) *Provider { return NewWithClient(cfg, http.DefaultClient) }
@@ -96,23 +119,44 @@ type consumePayload struct {
 	WindowsReset int    `json:"windows_reset"`
 	Code         string `json:"code"`
 	RedeemedAt   string `json:"redeemed_at"`
+	Credit       *struct {
+		ID         string `json:"id"`
+		Status     string `json:"status"`
+		RedeemedAt string `json:"redeemed_at"`
+	} `json:"credit"`
 }
 
 func (p *Provider) Fetch(ctx context.Context, now time.Time) (providers.Result, error) {
+	result, _, err := p.FetchForReset(ctx, now)
+	return result, err
+}
+
+// FetchForReset only reports exhaustion from an unambiguous account-wide seven
+// day window in this successful response, never from normalized/rounded cache.
+func (p *Provider) FetchForReset(ctx context.Context, now time.Time) (providers.Result, bool, error) {
 	resp, err := p.do(ctx, http.MethodGet, p.cfg.EndpointURL, nil)
 	if err != nil {
-		return providers.Result{}, err
+		return providers.Result{}, false, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		retry := ratelimit.RetryAfter(resp.Header, now)
-		return providers.Result{RetryAfter: retry}, providers.HTTPStatusError("chatgpt usage", resp.StatusCode, retry, resp.Body)
+		return providers.Result{RetryAfter: retry}, false, providers.HTTPStatusError("chatgpt usage", resp.StatusCode, retry, resp.Body)
 	}
 	var payload usagePayload
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return providers.Result{}, err
+		return providers.Result{}, false, err
 	}
-	return providers.Result{Items: Normalize(payload, now, p.cfg.RefreshMs, p.cfg.StaleMs)}, nil
+	weeklyCount, exhausted := 0, false
+	if payload.RateLimit != nil {
+		for _, w := range []*usageWindow{payload.RateLimit.PrimaryWindow, payload.RateLimit.SecondaryWindow} {
+			if w != nil && w.LimitWindowSeconds == 7*24*60*60 {
+				weeklyCount++
+				exhausted = w.UsedPercent == 100 && w.ResetAfterSeconds > 0
+			}
+		}
+	}
+	return providers.Result{Items: Normalize(payload, now, p.cfg.RefreshMs, p.cfg.StaleMs)}, weeklyCount == 1 && exhausted, nil
 }
 
 func (p *Provider) ListResetCredits(ctx context.Context, now time.Time) (model.ChatGPTResetCreditsResponse, error) {
@@ -165,13 +209,53 @@ func (p *Provider) ConsumeResetCredit(ctx context.Context, creditID, redeemReque
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return model.ChatGPTResetConsumeResponse{}, err
 	}
-	return model.ChatGPTResetConsumeResponse{Provider: "chatgpt", CreditID: creditID, RedeemRequestID: redeemRequestID, ConsumedAt: now.UnixMilli(), WindowsReset: payload.WindowsReset, Code: payload.Code, RedeemedAt: payload.RedeemedAt}, nil
+	redeemedAt := payload.RedeemedAt
+	if payload.Credit != nil && payload.Credit.RedeemedAt != "" {
+		redeemedAt = payload.Credit.RedeemedAt
+	}
+	if !consumeConfirmed(payload, redeemedAt) {
+		return model.ChatGPTResetConsumeResponse{}, errors.New("chatgpt reset redemption outcome is unconfirmed")
+	}
+	return model.ChatGPTResetConsumeResponse{Provider: "chatgpt", CreditID: creditID, RedeemRequestID: redeemRequestID, ConsumedAt: now.UnixMilli(), WindowsReset: payload.WindowsReset, Code: payload.Code, RedeemedAt: redeemedAt}, nil
+}
+
+func consumeConfirmed(payload consumePayload, redeemedAt string) bool {
+	code := strings.ToLower(strings.TrimSpace(payload.Code))
+	_, timeOK := parseRedeemedAt(redeemedAt)
+	switch code {
+	case "reset":
+		return timeOK && payload.WindowsReset > 0
+	case "already_redeemed":
+		if timeOK {
+			return true
+		}
+		return payload.Credit != nil && payload.Credit.Status == "redeemed"
+	default:
+		return false
+	}
+}
+
+func parseRedeemedAt(v string) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return ts, true
+	}
+	if ts, err := time.Parse(time.RFC3339, v); err == nil {
+		return ts, true
+	}
+	return time.Time{}, false
 }
 
 func (p *Provider) do(ctx context.Context, method, url string, body *bytes.Reader) (*http.Response, error) {
-	token, accountID, err := credentials(p.cfg)
-	if err != nil {
-		return nil, err
+	token, accountID := p.token, p.accountID
+	if token == "" {
+		var err error
+		token, accountID, err = credentials(p.cfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if accountID == "" {
 		accountID = accountIDFromJWT(token)
@@ -197,7 +281,13 @@ func (p *Provider) do(ctx context.Context, method, url string, body *bytes.Reade
 	if p.cfg.UserAgent != "" {
 		req.Header.Set("user-agent", p.cfg.UserAgent)
 	}
-	return p.client.Do(req)
+	// Never replay a redemption through redirects. A bound GET must also stay
+	// on its configured endpoint rather than forwarding pinned credentials.
+	client := *p.client
+	if method == http.MethodPost || p.token != "" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return client.Do(req)
 }
 
 func credentials(cfg config.ChatGPTConfig) (token, accountID string, err error) {
@@ -243,10 +333,10 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 	items := []model.QuotaItem{}
 	if payload.RateLimit != nil {
 		if payload.RateLimit.PrimaryWindow != nil {
-			items = append(items, windowItem("chatgpt-primary", "ChatGPT 5h", *payload.RateLimit.PrimaryWindow, now, refreshMs, staleMs))
+			items = append(items, windowItem("chatgpt-primary", "ChatGPT", *payload.RateLimit.PrimaryWindow, now, refreshMs, staleMs))
 		}
 		if payload.RateLimit.SecondaryWindow != nil {
-			items = append(items, windowItem("chatgpt-secondary", "ChatGPT weekly", *payload.RateLimit.SecondaryWindow, now, refreshMs, staleMs))
+			items = append(items, windowItem("chatgpt-secondary", "ChatGPT", *payload.RateLimit.SecondaryWindow, now, refreshMs, staleMs))
 		}
 	}
 	for _, limit := range payload.AdditionalRateLimits {
@@ -265,10 +355,10 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 			}
 		}
 		if primary != nil {
-			items = append(items, windowItem(baseID+"-primary", name+" 5h", *primary, now, refreshMs, staleMs))
+			items = append(items, windowItem(baseID+"-primary", name, *primary, now, refreshMs, staleMs))
 		}
 		if secondary != nil {
-			items = append(items, windowItem(baseID+"-secondary", name+" weekly", *secondary, now, refreshMs, staleMs))
+			items = append(items, windowItem(baseID+"-secondary", name, *secondary, now, refreshMs, staleMs))
 		}
 	}
 	if payload.ResetCredits != nil {
@@ -281,6 +371,11 @@ func windowItem(id, label string, w usageWindow, now time.Time, refreshMs, stale
 	used := clampPercent(w.UsedPercent)
 	remaining := math.Max(0, 100-used)
 	windowID, windowLabel, windowKind := windowMeta(w.LimitWindowSeconds)
+	suffix := windowID
+	if w.LimitWindowSeconds == 5*60*60 {
+		suffix = "5h"
+	}
+	label += " " + suffix
 	nowMs := now.UnixMilli()
 	item := model.QuotaItem{ID: id, Provider: "chatgpt", Label: label, Window: model.Window{ID: windowID, Label: windowLabel, Kind: windowKind}, Unit: "percent", Limit: 100, Used: used, Remaining: remaining, PercentUsed: used, State: "fresh", Severity: severityForPercent(used), Visible: true, Refresh: &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs}}
 	if w.ResetAfterSeconds > 0 {
@@ -338,7 +433,7 @@ func clampPercent(v float64) float64 {
 	if v > 100 {
 		return 100
 	}
-	return math.Round(v)
+	return v
 }
 func severityForPercent(v float64) string {
 	if v >= 100 {

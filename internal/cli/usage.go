@@ -327,7 +327,11 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 		}
 	}
 	if len(rows) == 0 {
-		return "No providers configured.\n"
+		text := "No providers configured.\n"
+		if usage.ChatGPTResetOnce != nil {
+			text += formatResetOnce(*usage.ChatGPTResetOnce) + "\n"
+		}
+		return text
 	}
 
 	widths := usageWidths{len("PROVIDER"), len("QUOTA"), len("WINDOW"), len("REMAINING")}
@@ -356,6 +360,9 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 			status,
 		}, "  ")
 		lines = append(lines, strings.TrimRight(line, " "))
+	}
+	if usage.ChatGPTResetOnce != nil {
+		lines = append(lines, "", formatResetOnce(*usage.ChatGPTResetOnce))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

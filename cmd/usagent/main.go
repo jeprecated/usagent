@@ -62,6 +62,11 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 				return cli.WriteHelp(stdout, "expiring")
 			}
 			return cli.RunExpiringUsage(ctx, args[1:], stdout, stderr)
+		case "reset-once":
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "reset-once")
+			}
+			return cli.RunResetOnce(ctx, args[1:], stdout, stderr)
 		case "mcp":
 			if wantsHelp(args[1:]) {
 				return cli.WriteHelp(stdout, "mcp")
@@ -93,6 +98,7 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	a.EnableResetOnce()
 	go a.RunRefreshLoop(ctx)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: httpapi.New(a, opts.ConfigPath), ReadHeaderTimeout: 5 * time.Second}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jeprecated/usagent/internal/analysis"
@@ -26,15 +27,17 @@ import (
 type ProviderTiming struct{ RefreshMs, StaleMs int64 }
 
 type App struct {
-	Cfg       config.Config
-	Store     *cache.Store
-	History   *history.Store
-	Providers []providers.Provider
-	Timings   map[string]ProviderTiming
-	StartedAt int64
-	Logger    *slog.Logger
-	mu        sync.Mutex
-	inFlight  map[string]bool
+	Cfg             config.Config
+	Store           *cache.Store
+	History         *history.Store
+	Providers       []providers.Provider
+	Timings         map[string]ProviderTiming
+	StartedAt       int64
+	Logger          *slog.Logger
+	mu              sync.Mutex
+	inFlight        map[string]bool
+	resetMu         sync.Mutex
+	resetOnceDaemon atomic.Bool
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
@@ -179,6 +182,10 @@ func (a *App) Usage(now time.Time) model.Usage {
 	u := a.Store.Overview(now, a.ProviderModels())
 	a.enrichQuotaMetadata(&u)
 	u.StartedAt = a.StartedAt
+	reset := a.ChatGPTResetOnceStatus()
+	if reset.Status != "off" {
+		u.ChatGPTResetOnce = &reset
+	}
 	return u
 }
 
@@ -265,12 +272,7 @@ func (a *App) ConsumeChatGPTResetCredit(ctx context.Context, creditID, redeemReq
 	if p == nil {
 		return model.ChatGPTResetConsumeResponse{}, errors.New("chatgpt provider is not enabled")
 	}
-	res, err := p.ConsumeResetCredit(ctx, creditID, redeemRequestID, now)
-	if err != nil {
-		return model.ChatGPTResetConsumeResponse{}, err
-	}
-	a.RefreshOne(ctx, p, now)
-	return res, nil
+	return a.consumeManualResetCredit(ctx, p, creditID, redeemRequestID, now)
 }
 
 func (a *App) chatGPTProvider() *chatgpt.Provider {
@@ -295,6 +297,15 @@ func (a *App) RefreshOne(ctx context.Context, p providers.Provider, now time.Tim
 		return
 	}
 	defer a.leave(p.ID())
+	if cp, ok := p.(*chatgpt.Provider); ok && a.resetOnceDaemon.Load() {
+		a.refreshChatGPTResetOnce(ctx, cp, now)
+		return
+	}
+	result, err := p.Fetch(ctx, now)
+	a.recordRefresh(p, result, err, now)
+}
+
+func (a *App) recordRefresh(p providers.Provider, result providers.Result, err error, now time.Time) {
 	timing := a.Timings[p.ID()]
 	if timing.RefreshMs <= 0 {
 		timing.RefreshMs = a.Cfg.Quota.RefreshMs
@@ -302,7 +313,6 @@ func (a *App) RefreshOne(ctx context.Context, p providers.Provider, now time.Tim
 	if timing.StaleMs <= 0 {
 		timing.StaleMs = max(timing.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))
 	}
-	result, err := p.Fetch(ctx, now)
 	_ = cache.ApplyFetch(a.Store, p, result, err, now, timing.RefreshMs, timing.StaleMs)
 	if err != nil {
 		a.Logger.Warn("provider refresh failed", "provider", p.ID(), "error", err)

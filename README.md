@@ -124,6 +124,9 @@ Finally, `usagent` observes account-scoped usage. It does not reserve quota, coo
 - `GET /v1/providers`
 - `GET /v1/chatgpt/reset-credits`
 - `POST /v1/chatgpt/reset-credits/consume`
+- `GET /v1/chatgpt/reset-once`
+- `POST /v1/chatgpt/reset-once/arm`
+- `POST /v1/chatgpt/reset-once/cancel`
 
 `/v1/config/raw` is intentionally not exposed. The usage/provider endpoints read the current cached snapshot; provider APIs are called only by the refresh coordinator. `GET /v1/usage/analysis` is cached-only: it derives per-item percent remaining, reset/window timing, inferred pace, pressure, projected exhaustion, confidence, and caveats from the current `/v1/usage` snapshot without refreshing providers. `GET /v1/expiring-usage` is also cached-only: it derives likely "use it or lose it" quota opportunities from the current `/v1/usage` snapshot and supports `within`/`withinMs`, `minimumRemainingPercent`, `providers`, `tiers`/`tier`, `tags`/`tag`, and `includeLowConfidence` query filters. Tier filters match provider or model tiers; tag filters use any matching provider/model tag. `GET /v1/recommendations/provider` supports the same cached-only `providers`, `tiers`/`tier`, `tags`/`tag`, `minimumRemainingPercent`, and `unit` filters. Expiring-usage responses separate raw reset-bound unused quota from actionable waste: `rawEstimatedWastedAmount`/`rawEstimatedWastedPercent` show the simple amount likely to reset unused, while `actionableWasteAmount`/`actionableWastePercent` are adjusted by history and overlapping parent windows. The legacy `estimatedWastedAmount` fields remain as raw estimated unused quota for compatibility, but opportunity scoring and CLI wording use actionable waste when available. For example, a 5h ChatGPT bucket may show 75% raw expiring unused, but only 18.75% actionable waste when a fresh weekly/monthly parent has enough future 5h resets to satisfy forecast demand. `GET /v1/resets` returns a reset calendar sorted by reset time, and `GET /v1/availability` returns conservative provider-level availability with blockers, constraints, and next likely improvement times. See [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for provider polling minimums and retry-header handling, and [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md) for ChatGPT/Codex reset banking details.
 
@@ -149,6 +152,14 @@ curl -fsS -X POST http://127.0.0.1:8788/v1/chatgpt/reset-credits/consume \
 ```
 
 This endpoint calls OpenAI's `/backend-api/wham/rate-limit-reset-credits/consume` endpoint and spends a real banked reset credit.
+
+To spend one credit automatically when the account-wide weekly quota hits zero, arm a one-shot toggle instead of enabling `allowResetConsume`:
+
+```sh
+usagent reset-once arm
+```
+
+The running loopback-only daemon consumes the earliest-expiring eligible credit on the next fresh exhausted weekly refresh, then disarms. See [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md).
 
 OpenAI API spend is separate and optional. It is fetched from the Admin Costs API when `providers.openai.enabled=true`. This does **not** track ChatGPT Plus/Pro subscription quota. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
 

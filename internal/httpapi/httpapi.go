@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -32,6 +33,9 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("GET /v1/resets", api.resets)
 	mux.HandleFunc("GET /v1/availability", api.availability)
 	mux.HandleFunc("GET /v1/providers", api.providers)
+	mux.HandleFunc("GET /v1/chatgpt/reset-once", api.chatGPTResetOnceStatus)
+	mux.HandleFunc("POST /v1/chatgpt/reset-once/arm", api.setChatGPTResetOnce)
+	mux.HandleFunc("POST /v1/chatgpt/reset-once/cancel", api.setChatGPTResetOnce)
 	mux.HandleFunc("GET /v1/chatgpt/reset-credits", api.chatGPTResetCredits)
 	mux.HandleFunc("POST /v1/chatgpt/reset-credits/consume", api.consumeChatGPTResetCredit)
 	return withJSON(mux)
@@ -91,7 +95,9 @@ func (api API) consumeChatGPTResetCredit(w http.ResponseWriter, r *http.Request)
 	res, err := api.App.ConsumeChatGPTResetCredit(r.Context(), req.CreditID, req.RedeemRequestID, time.Now())
 	if err != nil {
 		status := http.StatusBadGateway
-		if strings.Contains(err.Error(), "disabled") {
+		if errors.Is(err, app.ErrResetOnceBusy) || strings.Contains(err.Error(), "outcome unknown") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "disabled") {
 			status = http.StatusForbidden
 		} else if strings.Contains(err.Error(), "not enabled") || strings.Contains(err.Error(), "required") {
 			status = http.StatusBadRequest

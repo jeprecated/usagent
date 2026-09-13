@@ -17,6 +17,8 @@ func FormatHelp(command string, color bool) string {
 		text = usageHelp
 	case "expiring", "expiring-usage":
 		text = expiringHelp
+	case "reset-once":
+		text = resetOnceHelp
 	case "mcp":
 		text = mcpHelp
 	case "serve":
@@ -49,12 +51,14 @@ Usage:
   usagent [options]
   usagent usage [options]
   usagent expiring [options]
+  usagent reset-once arm|status|cancel [options]
   usagent mcp [options]
   usagent serve [options]
 
 Commands:
   usage, status  Show current quota (default)
   expiring       Show quota likely to expire unused
+  reset-once     Arm/cancel one ChatGPT reset at weekly exhaustion
   mcp            Start the stdio MCP server
   serve          Start the HTTP daemon
   help           Show this help
@@ -125,6 +129,34 @@ Options:
   --timeout DURATION  Request timeout (default 10s)
   --offline           Use local usage data
   -h, --help          Show this help
+`
+
+const resetOnceHelp = `usagent reset-once — use one reset when ChatGPT weekly quota reaches zero
+
+Usage:
+  usagent reset-once arm [options]
+  usagent reset-once status [options]
+  usagent reset-once cancel [options]
+
+Uses the earliest-expiring eligible credit, then disarms. Repeated arm commands
+never stack credits. Authorization survives daemon restarts. Only the running,
+loopback-only daemon can redeem automatically; local usage refreshes never spend.
+The check runs on the normal provider refresh cadence (usually five minutes).
+No recurring-auto-reset configuration or allowResetConsume change is needed.
+
+Options:
+  --config PATH          YAML config file
+  --daemon-url URL       Local daemon HTTP(S) origin (no remote/fallback)
+  --host HOST            Loopback daemon host
+  --port PORT            Daemon port
+  --timeout DURATION     Request timeout (default 10s)
+  --json                 Print JSON state
+  --acknowledge-unknown  Cancel only: acknowledge a manually reconciled outcome
+  -h, --help             Show this help
+
+If a redemption outcome is unknown, nothing is retried. Verify the credit and
+quota in ChatGPT before using cancel --acknowledge-unknown. This does not refund
+a credit or authorize another spend. Use arm separately only when ready.
 `
 
 const serveHelp = `usagent serve — start the HTTP daemon

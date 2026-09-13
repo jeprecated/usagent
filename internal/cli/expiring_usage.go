@@ -416,14 +416,14 @@ func formatExpiringAmount(v float64, unit string) string {
 }
 
 func shouldColor(w io.Writer) bool {
+	if force := os.Getenv("CLICOLOR_FORCE"); force != "" && force != "0" {
+		return true
+	}
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return false
 	}
 	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
-	}
-	if force := os.Getenv("CLICOLOR_FORCE"); force != "" && force != "0" {
-		return true
 	}
 	file, ok := w.(*os.File)
 	if !ok {

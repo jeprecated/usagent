@@ -70,14 +70,28 @@ type QuotaItem struct {
 	Error        *ItemError `json:"error,omitempty"`
 }
 
+// ChatGPTResetOnce is durable one-shot authorization, not provider config.
+// "unknown" is written BEFORE sending a redemption and is never auto-retried.
+type ChatGPTResetOnce struct {
+	Version         int    `json:"version"`
+	Status          string `json:"status"`
+	AccountID       string `json:"accountId,omitempty"`
+	ArmedAt         int64  `json:"armedAt,omitempty"`
+	UpdatedAt       int64  `json:"updatedAt,omitempty"`
+	CreditID        string `json:"creditId,omitempty"`
+	RedeemRequestID string `json:"redeemRequestId,omitempty"`
+	Message         string `json:"message,omitempty"`
+}
+
 type Usage struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	Service       string      `json:"service"`
-	GeneratedAt   int64       `json:"generatedAt"`
-	StartedAt     int64       `json:"startedAt"`
-	Stale         bool        `json:"stale"`
-	Providers     []Provider  `json:"providers"`
-	QuotaItems    []QuotaItem `json:"quotaItems"`
+	SchemaVersion    int               `json:"schemaVersion"`
+	Service          string            `json:"service"`
+	GeneratedAt      int64             `json:"generatedAt"`
+	StartedAt        int64             `json:"startedAt"`
+	Stale            bool              `json:"stale"`
+	Providers        []Provider        `json:"providers"`
+	QuotaItems       []QuotaItem       `json:"quotaItems"`
+	ChatGPTResetOnce *ChatGPTResetOnce `json:"chatgptResetOnce,omitempty"`
 }
 
 type ProvidersResponse struct {

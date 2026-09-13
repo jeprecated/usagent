@@ -145,7 +145,7 @@ Optional caller-supplied idempotency/request ID:
 
 If `redeemRequestId` is omitted, `usagent` generates one.
 
-Successful response:
+Successful local response:
 
 ```json
 {
@@ -153,11 +153,27 @@ Successful response:
   "creditId": "RateLimitResetCredit_...",
   "redeemRequestId": "...",
   "consumedAt": 1783410000000,
-  "windowsReset": 1,
+  "windowsReset": 2,
   "code": "reset",
   "redeemedAt": "2026-06-13T13:12:31Z"
 }
 ```
+
+The upstream WHAM body nests the timestamp:
+
+```json
+{
+  "code": "reset",
+  "windows_reset": 2,
+  "credit": {
+    "id": "RateLimitResetCredit_...",
+    "status": "redeemed",
+    "redeemed_at": "2026-06-13T13:12:31Z"
+  }
+}
+```
+
+`usagent` accepts either a top-level or `credit.redeemed_at` timestamp. `already_redeemed` is treated as a confirmed idempotent success. A 2xx body that cannot be confirmed leaves reset-once `unknown` and is never retried. If a later refresh sees the claimed credit no longer available and the account-wide weekly window recovered, the toggle is marked `consumed` without another POST.
 
 This calls:
 
@@ -171,6 +187,35 @@ Content-Type: application/json
 ```
 
 After a successful consume, `usagent` refreshes the ChatGPT provider so `/v1/usage` reflects the reset windows/count as soon as possible.
+
+## One-shot automatic redemption
+
+`reset-once` is a toggle, not a standing config permission. It authorizes the running daemon to spend **at most one** banked credit when the account-wide weekly window is freshly reported as exhausted (`used_percent == 100`, seven-day duration, reset still in the future). It does not fire on the 5h/session window or model-specific weekly windows.
+
+```sh
+usagent reset-once arm
+usagent reset-once status
+usagent reset-once cancel
+```
+
+Repeated `arm` commands do not stack credits. Authorization is stored next to the snapshot as `snapshot.json.reset-once.json` and survives daemon restarts. After a successful spend, or if no eligible credit exists, the toggle disarms.
+
+Selection rule: the available, unexpired credit with the earliest `expiresAt`. Credits with missing or invalid expiry are skipped. The selected credit ID and a request ID are persisted **before** the consume POST. An ambiguous outcome (`unknown`) is never retried automatically; verify the account, then `usagent reset-once cancel --acknowledge-unknown` if you have reconciled it. That acknowledgement does not refund a credit or authorize another spend.
+
+Requirements:
+
+- The HTTP daemon must be running the version that includes `reset-once`. Local CLI refreshes never redeem.
+- The daemon must listen on loopback (`127.0.0.1` / `::1`). A `0.0.0.0` listener is rejected even from localhost.
+- `allowResetConsume` is **not** required for `reset-once`. Manual consume still requires that config flag.
+- Detection uses the normal ChatGPT refresh cadence (usually five minutes), not instantaneous exhaustion.
+
+Local control API (loopback peer, no `Origin`, no forwarded-client headers, explicit action header + JSON confirm):
+
+- `GET /v1/chatgpt/reset-once`
+- `POST /v1/chatgpt/reset-once/arm` with `x-usagent-action: arm-chatgpt-reset-once`
+- `POST /v1/chatgpt/reset-once/cancel` with `x-usagent-action: cancel-chatgpt-reset-once`
+
+`usagent` usage output includes the current `ChatGPT reset-once:` line when the toggle is not `off`.
 
 ## Service-to-service use
 
@@ -195,8 +240,9 @@ Current safety model:
 
 Common local API errors:
 
-- `403`: reset consume is disabled by config.
+- `403`: reset consume is disabled by config, or reset-once was requested on a public listener / non-loopback / proxied request.
 - `400`: missing `creditId`, missing confirmation header, or missing confirmation body.
+- `409`: reset-once is busy, or a previous redemption outcome is still `unknown`.
 - `415`: `content-type` is not JSON.
 - `502`: upstream ChatGPT/OpenAI endpoint rejected the request or returned an unexpected error.
 
