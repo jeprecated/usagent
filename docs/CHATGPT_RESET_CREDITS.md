@@ -205,7 +205,7 @@ Selection rule: the available, unexpired credit with the earliest `expiresAt`. C
 Requirements:
 
 - The HTTP daemon must be running the version that includes `reset-once`. Local CLI refreshes never redeem.
-- The daemon must listen on loopback (`127.0.0.1` / `::1`). A `0.0.0.0` listener is rejected even from localhost.
+- Control commands must connect directly over loopback (`127.0.0.1` / `::1` / `localhost`). Wildcard listeners (`0.0.0.0` / `::`) are supported: remote usage readers can use the same daemon, but remote reset control is rejected. If the configured client URL uses a network address, run on the daemon host with `--daemon-url http://127.0.0.1:8788`. A daemon bound only to a specific network IP must also be configured to accept loopback connections.
 - `allowResetConsume` is **not** required for `reset-once`. Manual consume still requires that config flag.
 - Detection uses the normal ChatGPT refresh cadence (usually five minutes), not instantaneous exhaustion.
 
@@ -240,7 +240,7 @@ Current safety model:
 
 Common local API errors:
 
-- `403`: reset consume is disabled by config, or reset-once was requested on a public listener / non-loopback / proxied request.
+- `403`: reset consume is disabled by config, or reset-once was requested through a non-loopback connection, non-loopback Host, browser Origin, or forwarded-client headers.
 - `400`: missing `creditId`, missing confirmation header, or missing confirmation body.
 - `409`: reset-once is busy, or a previous redemption outcome is still `unknown`.
 - `415`: `content-type` is not JSON.

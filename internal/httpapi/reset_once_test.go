@@ -43,28 +43,33 @@ func resetRequest(action string) *http.Request {
 }
 
 func TestResetOnceAPIArmStatusCancel(t *testing.T) {
-	a, h := resetAPI(t)
-	for _, action := range []string{"arm", "arm", "cancel"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, resetRequest(action))
-		want := "armed"
-		if action == "cancel" {
-			want = "cancelled"
-		}
-		var state model.ChatGPTResetOnce
-		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &state) != nil || state.Status != want {
-			t.Fatalf("%s: %d %s", action, rec.Code, rec.Body.String())
-		}
-	}
-	if a.Cfg.Providers.ChatGPT.AllowResetConsume {
-		t.Fatal("arming must not enable general consumption")
-	}
-	r := httptest.NewRequest("GET", "http://localhost/v1/chatgpt/reset-once", nil)
-	r.RemoteAddr = "[::1]:1234"
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, r)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"cancelled"`) {
-		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	for _, host := range []string{"127.0.0.1", "0.0.0.0", "::"} {
+		t.Run(host, func(t *testing.T) {
+			a, h := resetAPI(t)
+			a.Cfg.Server.Host = host
+			for _, action := range []string{"arm", "arm", "cancel"} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, resetRequest(action))
+				want := "armed"
+				if action == "cancel" {
+					want = "cancelled"
+				}
+				var state model.ChatGPTResetOnce
+				if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &state) != nil || state.Status != want {
+					t.Fatalf("%s: %d %s", action, rec.Code, rec.Body.String())
+				}
+			}
+			if a.Cfg.Providers.ChatGPT.AllowResetConsume {
+				t.Fatal("arming must not enable general consumption")
+			}
+			r := httptest.NewRequest("GET", "http://localhost/v1/chatgpt/reset-once", nil)
+			r.RemoteAddr = "[::1]:1234"
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"cancelled"`) {
+				t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -93,6 +98,7 @@ func TestResetOnceAPIRejectsUnsafeRequests(t *testing.T) {
 		} {
 			t.Run(action+"/"+name, func(t *testing.T) {
 				a, h := resetAPI(t)
+				a.Cfg.Server.Host = "0.0.0.0"
 				r := resetRequest(action)
 				mutate(r)
 				rec := httptest.NewRecorder()
@@ -106,15 +112,6 @@ func TestResetOnceAPIRejectsUnsafeRequests(t *testing.T) {
 			})
 		}
 	}
-	t.Run("public-listener", func(t *testing.T) {
-		a, _ := resetAPI(t)
-		a.Cfg.Server.Host = "0.0.0.0"
-		rec := httptest.NewRecorder()
-		New(a, "").ServeHTTP(rec, resetRequest("arm"))
-		if rec.Code != 403 {
-			t.Fatalf("public daemon permitted arming: %d", rec.Code)
-		}
-	})
 	t.Run("get-cannot-arm", func(t *testing.T) {
 		a, h := resetAPI(t)
 		r := resetRequest("arm")

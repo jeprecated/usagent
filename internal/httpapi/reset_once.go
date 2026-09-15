@@ -15,7 +15,8 @@ import (
 )
 
 // Reset-once grants spending authority without a standing config permission.
-// It must not be exposed through a public listener, proxy or browser origin.
+// Require a direct loopback caller, even when the listener also serves remote
+// usage readers. Reject proxy headers and browser origins.
 func (api API) localResetControl(w http.ResponseWriter, r *http.Request) bool {
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)
 	host := r.Host
@@ -23,8 +24,8 @@ func (api API) localResetControl(w http.ResponseWriter, r *http.Request) bool {
 		host = h
 	}
 	peerIP := net.ParseIP(peer)
-	if err != nil || peerIP == nil || !peerIP.IsLoopback() || !loopbackHost(host) || !loopbackHost(api.App.Cfg.Server.Host) || r.Header.Get("Origin") != "" {
-		writeError(w, http.StatusForbidden, "reset-once requires a direct local request to a loopback-only daemon")
+	if err != nil || peerIP == nil || !peerIP.IsLoopback() || !loopbackHost(host) || r.Header.Get("Origin") != "" {
+		writeError(w, http.StatusForbidden, "reset-once requires a direct loopback request without a browser Origin")
 		return false
 	}
 	for _, h := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP"} {

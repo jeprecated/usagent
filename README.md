@@ -159,7 +159,7 @@ To spend one credit automatically when the account-wide weekly quota hits zero, 
 usagent reset-once arm
 ```
 
-The running loopback-only daemon consumes the earliest-expiring eligible credit on the next fresh exhausted weekly refresh, then disarms. See [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md).
+The running daemon consumes the earliest-expiring eligible credit on the next fresh exhausted weekly refresh, then disarms. Reset control requires a direct loopback connection, but the daemon can still serve remote usage readers. If your client URL points to a remote-facing address, run locally on the daemon host with `usagent reset-once arm --daemon-url http://127.0.0.1:8788` (the listener must accept loopback connections). See [`docs/CHATGPT_RESET_CREDITS.md`](docs/CHATGPT_RESET_CREDITS.md).
 
 OpenAI API spend is separate and optional. It is fetched from the Admin Costs API when `providers.openai.enabled=true`. This does **not** track ChatGPT Plus/Pro subscription quota. Provide an admin key in `OPENAI_ADMIN_KEY` (or the configured `apiKeyEnv`) and define USD budgets:
 

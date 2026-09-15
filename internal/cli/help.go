@@ -139,8 +139,9 @@ Usage:
   usagent reset-once cancel [options]
 
 Uses the earliest-expiring eligible credit, then disarms. Repeated arm commands
-never stack credits. Authorization survives daemon restarts. Only the running,
-loopback-only daemon can redeem automatically; local usage refreshes never spend.
+never stack credits. Authorization survives daemon restarts. Only the running
+daemon can redeem automatically; local usage refreshes never spend. Control it
+through a direct loopback connection; remote usage readers remain supported.
 The check runs on the normal provider refresh cadence (usually five minutes).
 No recurring-auto-reset configuration or allowResetConsume change is needed.
 
