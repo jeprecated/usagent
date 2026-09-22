@@ -35,6 +35,8 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs.DurationVar(&opts.Timeout, "timeout", opts.Timeout, "request timeout")
 	fs.BoolVar(&opts.JSON, "json", false, "print JSON")
 	fs.BoolVar(&acknowledge, "acknowledge-unknown", false, "acknowledge an outcome already manually reconciled")
+	var provider string
+	fs.StringVar(&provider, "provider", "chatgpt", "chatgpt or claude-code")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -70,10 +72,14 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return errors.New("reset-once only controls a local loopback daemon; use --daemon-url http://127.0.0.1:PORT")
 	}
-	u.Path = "/v1/chatgpt/reset-once"
+	route, confirm, label, err := resetOnceRoute(provider)
+	if err != nil {
+		return err
+	}
+	u.Path = route
 	method := http.MethodGet
 	var body io.Reader
-	confirm := action + "-chatgpt-reset-once"
+	confirm = action + "-" + confirm
 	if action != "status" {
 		u.Path += "/" + action
 		method = http.MethodPost
@@ -128,12 +134,27 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		enc.SetIndent("", "  ")
 		return enc.Encode(state)
 	}
-	_, err = fmt.Fprintln(stdout, formatResetOnce(state))
+	_, err = fmt.Fprintln(stdout, formatResetOnceLabel(label, state))
 	return err
 }
 
+func resetOnceRoute(provider string) (path, confirm, label string, err error) {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "chatgpt":
+		return "/v1/chatgpt/reset-once", "chatgpt-reset-once", "ChatGPT", nil
+	case "claude-code", "claude", "claudeoauth":
+		return "/v1/claude-code/reset-once", "claude-code-reset-once", "Claude", nil
+	default:
+		return "", "", "", errors.New("reset-once --provider must be chatgpt or claude-code")
+	}
+}
+
 func formatResetOnce(s model.ChatGPTResetOnce) string {
-	line := "ChatGPT reset-once: " + s.Status
+	return formatResetOnceLabel("ChatGPT", s)
+}
+
+func formatResetOnceLabel(label string, s model.ResetOnceState) string {
+	line := label + " reset-once: " + s.Status
 	if s.Message != "" {
 		line += " — " + strings.Join(strings.Fields(s.Message), " ")
 	}

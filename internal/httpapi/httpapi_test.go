@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -398,6 +399,70 @@ func TestChatGPTResetCreditsEndpoints(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/v1/chatgpt/reset-credits/consume", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-usagent-action", "consume-chatgpt-reset-credit")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !consumed {
+		t.Fatalf("consume status=%d consumed=%v body=%s", rec.Code, consumed, rec.Body.String())
+	}
+}
+
+func TestClaudeResetCreditsEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "credentials.json")
+	accountPath := filepath.Join(dir, "claude.json")
+	if err := os.WriteFile(credPath, []byte(`{"claudeAiOauth":{"accessToken":"secret-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(accountPath, []byte(`{"oauthAccount":{"organizationUuid":"org-1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var consumed bool
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			consumed = true
+			fmt.Fprint(w, `{"result":"reset","cleared":["five_hour","seven_day"],"weekly_resets_at":"2026-09-29T12:00:00Z"}`)
+		default:
+			fmt.Fprint(w, `{"cedar_ember":{"eligible":true,"next_grant_id":"grant-1","grants":[{"id":"grant-1","label":"Full reset","resets_left":1,"starts_at":"2026-09-22T00:00:00Z","ends_at":"2026-10-22T00:00:00Z","usable_now":true}]}}`)
+		}
+	}))
+	defer provider.Close()
+	cfg := config.Default()
+	cfg.Server.StatePath = filepath.Join(dir, "snapshot.json")
+	cfg.Providers.ClaudeOAuth.Enabled = true
+	cfg.Providers.ClaudeOAuth.CredentialsPath = credPath
+	cfg.Providers.ClaudeOAuth.AccountPath = accountPath
+	cfg.Providers.ClaudeOAuth.EndpointURL = provider.URL
+	cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL = provider.URL + "/api/organizations/{organizationUuid}/reset_rate_limits"
+	a := app.New(cfg, nil)
+	h := New(a, "config.example.yaml")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/claude-code/reset-credits", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed model.ClaudeResetCreditsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil || listed.AvailableCount != 1 || len(listed.Credits) != 1 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+
+	body := []byte(`{"creditId":"grant-1","redeemRequestId":"req-1","confirm":"consume-claude-code-reset-credit"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/claude-code/reset-credits/consume", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-usagent-action", "consume-claude-code-reset-credit")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || consumed {
+		t.Fatalf("consume without opt-in status=%d consumed=%v body=%s", rec.Code, consumed, rec.Body.String())
+	}
+
+	cfg.Providers.ClaudeOAuth.AllowResetConsume = true
+	a = app.New(cfg, nil)
+	h = New(a, "config.example.yaml")
+	req = httptest.NewRequest(http.MethodPost, "/v1/claude-code/reset-credits/consume", bytes.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-usagent-action", "consume-claude-code-reset-credit")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !consumed {

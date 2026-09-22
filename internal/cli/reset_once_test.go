@@ -114,3 +114,31 @@ func TestResetOnceStatusAppearsInUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestResetOnceCLIClaudeProvider(t *testing.T) {
+	configPath := resetCLIConfig(t)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path != "/v1/claude-code/reset-once/arm" || r.Header.Get("X-Usagent-Action") != "arm-claude-code-reset-once" {
+			t.Errorf("got %s %s action=%s", r.Method, r.URL.Path, r.Header.Get("X-Usagent-Action"))
+		}
+		fmt.Fprint(w, `{"version":1,"status":"armed","message":"weekly zero; one grant"}`)
+	}))
+	defer srv.Close()
+	var stdout, stderr bytes.Buffer
+	if err := RunResetOnce(context.Background(), []string{"arm", "--provider", "claude-code", "--config", configPath, "--daemon-url", srv.URL}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Claude reset-once: armed") || hits.Load() != 1 {
+		t.Fatalf("output=%s hits=%d", stdout.String(), hits.Load())
+	}
+}
+
+func TestResetOnceCLIRejectsUnknownProvider(t *testing.T) {
+	configPath := resetCLIConfig(t)
+	var stdout, stderr bytes.Buffer
+	if err := RunResetOnce(context.Background(), []string{"arm", "--provider", "cursor", "--config", configPath, "--daemon-url", "http://127.0.0.1:1"}, &stdout, &stderr); err == nil {
+		t.Fatal("accepted unknown provider")
+	}
+}

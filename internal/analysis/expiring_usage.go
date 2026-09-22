@@ -652,7 +652,7 @@ func normalizedConfidence(value, fallback string) string {
 func isResetCreditBankItem(item model.QuotaItem) bool {
 	id := strings.ToLower(item.ID)
 	label := strings.ToLower(item.Label)
-	return id == "chatgpt-rate-limit-reset-credits" || strings.Contains(id, "reset-credit") || strings.Contains(id, "reset_credits") || strings.Contains(label, "reset credit")
+	return id == "chatgpt-rate-limit-reset-credits" || id == "claude-code-rate-limit-reset-credits" || strings.Contains(id, "reset-credit") || strings.Contains(id, "reset_credits") || strings.Contains(label, "reset credit")
 }
 
 func urgencyFor(d time.Duration) string {

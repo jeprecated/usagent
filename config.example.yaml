@@ -25,7 +25,13 @@ providers:
   claudeOAuth:
     enabled: true
     credentialsPath: "~/.claude/.credentials.json"
+    accountPath: "~/.claude.json"
     endpointUrl: "https://api.anthropic.com/api/oauth/usage"
+    profileEndpointUrl: "https://api.anthropic.com/api/oauth/profile"
+    resetConsumeEndpointUrl: "https://api.anthropic.com/api/organizations/{organizationUuid}/reset_rate_limits"
+    # Mutating API endpoint remains disabled unless explicitly enabled. Keep this false
+    # on broadly reachable central listeners pending a later security design.
+    allowResetConsume: false
     betaHeader: "oauth-2025-04-20"
     userAgent: "claude-code/2.0"
     refreshMs: 900000

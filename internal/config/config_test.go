@@ -18,8 +18,8 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Client.Mode != ClientModePreferDaemon || cfg.Client.URL != "" {
 		t.Fatalf("client=%+v", cfg.Client)
 	}
-	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" {
-		t.Fatal("missing claude endpoint/user-agent")
+	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" || cfg.Providers.ClaudeOAuth.AccountPath == "" || cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL == "" || cfg.Providers.ClaudeOAuth.AllowResetConsume {
+		t.Fatalf("claude=%+v", cfg.Providers.ClaudeOAuth)
 	}
 	if got := cfg.UsageView.Providers; len(got) != 4 || got[0] != "claude-code" || got[1] != "chatgpt" || got[3] != "cursor" {
 		t.Fatalf("providers=%v", got)

@@ -38,6 +38,7 @@ type App struct {
 	mu                sync.Mutex
 	inFlight          map[string]bool
 	resetMu           sync.Mutex
+	claudeResetMu     sync.Mutex
 	resetOnceDaemon   atomic.Bool
 	resetEventsDaemon atomic.Bool
 	ResetEvents       *resetevents.Store
@@ -189,6 +190,10 @@ func (a *App) Usage(now time.Time) model.Usage {
 	if reset.Status != "off" {
 		u.ChatGPTResetOnce = &reset
 	}
+	claudeReset := a.ClaudeResetOnceStatus()
+	if claudeReset.Status != "off" {
+		u.ClaudeResetOnce = &claudeReset
+	}
 	return u
 }
 
@@ -278,9 +283,37 @@ func (a *App) ConsumeChatGPTResetCredit(ctx context.Context, creditID, redeemReq
 	return a.consumeManualResetCredit(ctx, p, creditID, redeemRequestID, now)
 }
 
+func (a *App) ClaudeResetCredits(ctx context.Context, now time.Time) (model.ClaudeResetCreditsResponse, error) {
+	p := a.claudeProvider()
+	if p == nil {
+		return model.ClaudeResetCreditsResponse{}, errors.New("claude-code provider is not enabled")
+	}
+	return p.ListResetCredits(ctx, now)
+}
+
+func (a *App) ConsumeClaudeResetCredit(ctx context.Context, creditID, redeemRequestID string, now time.Time) (model.ClaudeResetConsumeResponse, error) {
+	if !a.Cfg.Providers.ClaudeOAuth.AllowResetConsume {
+		return model.ClaudeResetConsumeResponse{}, errors.New("claude reset credit consumption is disabled")
+	}
+	p := a.claudeProvider()
+	if p == nil {
+		return model.ClaudeResetConsumeResponse{}, errors.New("claude-code provider is not enabled")
+	}
+	return a.consumeManualClaudeResetCredit(ctx, p, creditID, redeemRequestID, now)
+}
+
 func (a *App) chatGPTProvider() *chatgpt.Provider {
 	for _, p := range a.Providers {
 		if cp, ok := p.(*chatgpt.Provider); ok {
+			return cp
+		}
+	}
+	return nil
+}
+
+func (a *App) claudeProvider() *claude.Provider {
+	for _, p := range a.Providers {
+		if cp, ok := p.(*claude.Provider); ok {
 			return cp
 		}
 	}
@@ -302,6 +335,10 @@ func (a *App) RefreshOne(ctx context.Context, p providers.Provider, now time.Tim
 	defer a.leave(p.ID())
 	if cp, ok := p.(*chatgpt.Provider); ok && a.resetOnceDaemon.Load() {
 		a.refreshChatGPTResetOnce(ctx, cp, now)
+		return
+	}
+	if cp, ok := p.(*claude.Provider); ok && a.resetOnceDaemon.Load() {
+		a.refreshClaudeResetOnce(ctx, cp, now)
 		return
 	}
 	result, err := p.Fetch(ctx, now)

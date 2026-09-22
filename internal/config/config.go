@@ -86,14 +86,18 @@ type ProviderMetadataConfig struct {
 }
 
 type ClaudeOAuthConfig struct {
-	Enabled         bool                   `yaml:"enabled"`
-	CredentialsPath string                 `yaml:"credentialsPath"`
-	EndpointURL     string                 `yaml:"endpointUrl"`
-	BetaHeader      string                 `yaml:"betaHeader"`
-	UserAgent       string                 `yaml:"userAgent"`
-	RefreshMs       int64                  `yaml:"refreshMs"`
-	StaleMs         int64                  `yaml:"staleMs"`
-	Metadata        ProviderMetadataConfig `yaml:"metadata"`
+	Enabled                 bool                   `yaml:"enabled"`
+	CredentialsPath         string                 `yaml:"credentialsPath"`
+	AccountPath             string                 `yaml:"accountPath"`
+	EndpointURL             string                 `yaml:"endpointUrl"`
+	ProfileEndpointURL      string                 `yaml:"profileEndpointUrl"`
+	ResetConsumeEndpointURL string                 `yaml:"resetConsumeEndpointUrl"`
+	AllowResetConsume       bool                   `yaml:"allowResetConsume"`
+	BetaHeader              string                 `yaml:"betaHeader"`
+	UserAgent               string                 `yaml:"userAgent"`
+	RefreshMs               int64                  `yaml:"refreshMs"`
+	StaleMs                 int64                  `yaml:"staleMs"`
+	Metadata                ProviderMetadataConfig `yaml:"metadata"`
 }
 
 type ChatGPTConfig struct {
@@ -252,7 +256,7 @@ func Default() Config {
 		Client:        ClientConfig{Mode: ClientModePreferDaemon},
 		Notifications: NotificationConfig{Weekly: true, Monthly: true, SessionBelowPercent: 20},
 		Providers: ProvidersConfig{
-			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", BetaHeader: "oauth-2025-04-20"},
+			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", AccountPath: "~/.claude.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", ProfileEndpointURL: "https://api.anthropic.com/api/oauth/profile", ResetConsumeEndpointURL: "https://api.anthropic.com/api/organizations/{organizationUuid}/reset_rate_limits", BetaHeader: "oauth-2025-04-20"},
 			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
 			OpenAI:      OpenAIConfig{Enabled: false, APIKeyEnv: "OPENAI_ADMIN_KEY", BaseURL: "https://api.openai.com"},
 			ZAI:         ZAIConfig{Enabled: false, EndpointURL: "https://api.z.ai/api/monitor/usage/quota/limit", TokenEnv: "ZAI_API_KEY", TokenEnvFallbacks: []string{"GLM_API_KEY"}, AuthScheme: "bearer", AuthHeader: "Authorization", ExcludeLimitTypes: []string{"TIME_LIMIT"}},
@@ -375,6 +379,10 @@ func Normalize(cfg Config) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+	cfg.Providers.ClaudeOAuth.AccountPath, err = ExpandRuntimePath(cfg.Providers.ClaudeOAuth.AccountPath)
+	if err != nil {
+		return cfg, err
+	}
 	cfg.Providers.ChatGPT.AuthPath, err = ExpandRuntimePath(cfg.Providers.ChatGPT.AuthPath)
 	if err != nil {
 		return cfg, err
@@ -390,8 +398,17 @@ func normalizeProviderDefaults(cfg Config) Config {
 	if cfg.Providers.ClaudeOAuth.CredentialsPath == "" {
 		cfg.Providers.ClaudeOAuth.CredentialsPath = "~/.claude/.credentials.json"
 	}
+	if cfg.Providers.ClaudeOAuth.AccountPath == "" {
+		cfg.Providers.ClaudeOAuth.AccountPath = "~/.claude.json"
+	}
 	if cfg.Providers.ClaudeOAuth.EndpointURL == "" {
 		cfg.Providers.ClaudeOAuth.EndpointURL = "https://api.anthropic.com/api/oauth/usage"
+	}
+	if cfg.Providers.ClaudeOAuth.ProfileEndpointURL == "" {
+		cfg.Providers.ClaudeOAuth.ProfileEndpointURL = "https://api.anthropic.com/api/oauth/profile"
+	}
+	if cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL == "" {
+		cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL = "https://api.anthropic.com/api/organizations/{organizationUuid}/reset_rate_limits"
 	}
 	if cfg.Providers.ClaudeOAuth.BetaHeader == "" {
 		cfg.Providers.ClaudeOAuth.BetaHeader = "oauth-2025-04-20"

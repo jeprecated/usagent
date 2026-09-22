@@ -39,6 +39,11 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("POST /v1/chatgpt/reset-once/cancel", api.setChatGPTResetOnce)
 	mux.HandleFunc("GET /v1/chatgpt/reset-credits", api.chatGPTResetCredits)
 	mux.HandleFunc("POST /v1/chatgpt/reset-credits/consume", api.consumeChatGPTResetCredit)
+	mux.HandleFunc("GET /v1/claude-code/reset-once", api.claudeResetOnceStatus)
+	mux.HandleFunc("POST /v1/claude-code/reset-once/arm", api.setClaudeResetOnce)
+	mux.HandleFunc("POST /v1/claude-code/reset-once/cancel", api.setClaudeResetOnce)
+	mux.HandleFunc("GET /v1/claude-code/reset-credits", api.claudeResetCredits)
+	mux.HandleFunc("POST /v1/claude-code/reset-credits/consume", api.consumeClaudeResetCredit)
 	return withJSON(mux)
 }
 
@@ -94,6 +99,53 @@ func (api API) consumeChatGPTResetCredit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	res, err := api.App.ConsumeChatGPTResetCredit(r.Context(), req.CreditID, req.RedeemRequestID, time.Now())
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, app.ErrResetOnceBusy) || strings.Contains(err.Error(), "outcome unknown") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "disabled") {
+			status = http.StatusForbidden
+		} else if strings.Contains(err.Error(), "not enabled") || strings.Contains(err.Error(), "required") {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (api API) claudeResetCredits(w http.ResponseWriter, r *http.Request) {
+	res, err := api.App.ClaudeResetCredits(r.Context(), time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (api API) consumeClaudeResetCredit(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("content-type")), "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
+		return
+	}
+	if r.Header.Get("x-usagent-action") != "consume-claude-code-reset-credit" {
+		writeError(w, http.StatusBadRequest, "missing x-usagent-action: consume-claude-code-reset-credit")
+		return
+	}
+	var req struct {
+		CreditID        string `json:"creditId"`
+		RedeemRequestID string `json:"redeemRequestId"`
+		Confirm         string `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Confirm != "consume-claude-code-reset-credit" {
+		writeError(w, http.StatusBadRequest, "confirm must be consume-claude-code-reset-credit")
+		return
+	}
+	res, err := api.App.ConsumeClaudeResetCredit(r.Context(), req.CreditID, req.RedeemRequestID, time.Now())
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, app.ErrResetOnceBusy) || strings.Contains(err.Error(), "outcome unknown") {

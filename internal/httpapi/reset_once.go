@@ -97,3 +97,56 @@ func (api API) setChatGPTResetOnce(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, state)
 }
+
+func (api API) claudeResetOnceStatus(w http.ResponseWriter, r *http.Request) {
+	if !api.localResetControl(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, api.App.ClaudeResetOnceStatus())
+}
+
+func (api API) setClaudeResetOnce(w http.ResponseWriter, r *http.Request) {
+	if !api.localResetControl(w, r) {
+		return
+	}
+	action := strings.TrimPrefix(r.URL.Path, "/v1/claude-code/reset-once/")
+	confirm := action + "-claude-code-reset-once"
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
+		return
+	}
+	if r.Header.Get("X-Usagent-Action") != confirm {
+		writeError(w, http.StatusBadRequest, "missing explicit reset-once action header")
+		return
+	}
+	var req struct {
+		Confirm            string `json:"confirm"`
+		AcknowledgeUnknown bool   `json:"acknowledgeUnknown"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid reset-once JSON body")
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF || req.Confirm != confirm || (action != "cancel" && req.AcknowledgeUnknown) {
+		writeError(w, http.StatusBadRequest, "invalid reset-once confirmation")
+		return
+	}
+	var state model.ClaudeResetOnce
+	if action == "arm" {
+		state, err = api.App.ArmClaudeResetOnce(time.Now())
+	} else {
+		state, err = api.App.CancelClaudeResetOnce(req.AcknowledgeUnknown, time.Now())
+	}
+	if err != nil {
+		status := http.StatusConflict
+		if !errors.Is(err, app.ErrResetOnceBusy) && state.Status == "" {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}

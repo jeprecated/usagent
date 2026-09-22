@@ -61,7 +61,7 @@ Usage:
 Commands:
   usage, status  Show current quota (default)
   expiring       Show quota likely to expire unused
-  reset-once     Arm/cancel one ChatGPT reset at weekly exhaustion
+  reset-once     Arm/cancel one ChatGPT or Claude reset at weekly exhaustion
   notify         Watch for quota replenishments with sticky desktop alerts
   mcp            Start the stdio MCP server
   serve          Start the HTTP daemon
@@ -135,7 +135,7 @@ Options:
   -h, --help          Show this help
 `
 
-const resetOnceHelp = `usagent reset-once — use one reset when ChatGPT weekly quota reaches zero
+const resetOnceHelp = `usagent reset-once — use one reset when weekly quota reaches zero
 
 Usage:
   usagent reset-once arm [options]
@@ -146,10 +146,12 @@ Uses the earliest-expiring eligible credit, then disarms. Repeated arm commands
 never stack credits. Authorization survives daemon restarts. Only the running
 daemon can redeem automatically; local usage refreshes never spend. Control it
 through a direct loopback connection; remote usage readers remain supported.
-The check runs on the normal provider refresh cadence (usually five minutes).
-No recurring-auto-reset configuration or allowResetConsume change is needed.
+The check runs on the normal provider refresh cadence. No recurring-auto-reset
+configuration or allowResetConsume change is needed. ChatGPT and Claude Code
+toggles are independent.
 
 Options:
+  --provider NAME        chatgpt (default) or claude-code
   --config PATH          YAML config file
   --daemon-url URL       Local daemon HTTP(S) origin (no remote/fallback)
   --host HOST            Loopback daemon host
@@ -160,8 +162,8 @@ Options:
   -h, --help             Show this help
 
 If a redemption outcome is unknown, nothing is retried. Verify the credit and
-quota in ChatGPT before using cancel --acknowledge-unknown. This does not refund
-a credit or authorize another spend. Use arm separately only when ready.
+quota on the provider before using cancel --acknowledge-unknown. This does not
+refund a credit or authorize another spend. Use arm separately only when ready.
 `
 
 const notifyHelp = `usagent notify — desktop alerts when quota replenishes

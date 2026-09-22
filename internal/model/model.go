@@ -70,9 +70,9 @@ type QuotaItem struct {
 	Error        *ItemError `json:"error,omitempty"`
 }
 
-// ChatGPTResetOnce is durable one-shot authorization, not provider config.
+// ResetOnceState is durable one-shot authorization, not provider config.
 // "unknown" is written BEFORE sending a redemption and is never auto-retried.
-type ChatGPTResetOnce struct {
+type ResetOnceState struct {
 	Version         int    `json:"version"`
 	Status          string `json:"status"`
 	AccountID       string `json:"accountId,omitempty"`
@@ -83,6 +83,12 @@ type ChatGPTResetOnce struct {
 	Message         string `json:"message,omitempty"`
 }
 
+// ChatGPTResetOnce is durable one-shot authorization for ChatGPT/Codex.
+type ChatGPTResetOnce = ResetOnceState
+
+// ClaudeResetOnce is durable one-shot authorization for Claude Code banked resets.
+type ClaudeResetOnce = ResetOnceState
+
 type Usage struct {
 	SchemaVersion    int               `json:"schemaVersion"`
 	Service          string            `json:"service"`
@@ -92,6 +98,7 @@ type Usage struct {
 	Providers        []Provider        `json:"providers"`
 	QuotaItems       []QuotaItem       `json:"quotaItems"`
 	ChatGPTResetOnce *ChatGPTResetOnce `json:"chatgptResetOnce,omitempty"`
+	ClaudeResetOnce  *ClaudeResetOnce  `json:"claudeResetOnce,omitempty"`
 }
 
 type ProvidersResponse struct {
@@ -123,4 +130,38 @@ type ChatGPTResetConsumeResponse struct {
 	Code            string                 `json:"code,omitempty"`
 	RedeemedAt      string                 `json:"redeemedAt,omitempty"`
 	Raw             map[string]interface{} `json:"raw,omitempty"`
+}
+
+type ClaudeResetCredit struct {
+	ID          string   `json:"id"`
+	Status      string   `json:"status"`
+	Title       string   `json:"title,omitempty"`
+	GrantedAt   string   `json:"grantedAt,omitempty"`
+	ExpiresAt   string   `json:"expiresAt,omitempty"`
+	ResetsLeft  int      `json:"resetsLeft,omitempty"`
+	ResetsTotal int      `json:"resetsTotal,omitempty"`
+	Clears      []string `json:"clears,omitempty"`
+	UsableNow   bool     `json:"usableNow,omitempty"`
+	Paused      bool     `json:"paused,omitempty"`
+}
+
+type ClaudeResetCreditsResponse struct {
+	Provider       string              `json:"provider"`
+	AvailableCount int                 `json:"availableCount"`
+	Eligible       bool                `json:"eligible"`
+	NextGrantID    string              `json:"nextGrantId,omitempty"`
+	Credits        []ClaudeResetCredit `json:"credits"`
+	FetchedAt      int64               `json:"fetchedAt"`
+}
+
+type ClaudeResetConsumeResponse struct {
+	Provider        string   `json:"provider"`
+	CreditID        string   `json:"creditId"`
+	RedeemRequestID string   `json:"redeemRequestId"`
+	ConsumedAt      int64    `json:"consumedAt"`
+	WindowsReset    int      `json:"windowsReset,omitempty"`
+	Code            string   `json:"code,omitempty"`
+	Cleared         []string `json:"cleared,omitempty"`
+	WeeklyResetsAt  string   `json:"weeklyResetsAt,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
 }

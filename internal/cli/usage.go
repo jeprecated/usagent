@@ -331,6 +331,9 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 		if usage.ChatGPTResetOnce != nil {
 			text += formatResetOnce(*usage.ChatGPTResetOnce) + "\n"
 		}
+		if usage.ClaudeResetOnce != nil {
+			text += formatResetOnceLabel("Claude", *usage.ClaudeResetOnce) + "\n"
+		}
 		return text
 	}
 
@@ -363,6 +366,9 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 	}
 	if usage.ChatGPTResetOnce != nil {
 		lines = append(lines, "", formatResetOnce(*usage.ChatGPTResetOnce))
+	}
+	if usage.ClaudeResetOnce != nil {
+		lines = append(lines, "", formatResetOnceLabel("Claude", *usage.ClaudeResetOnce))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
