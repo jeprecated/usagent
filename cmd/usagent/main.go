@@ -62,6 +62,13 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 				return cli.WriteHelp(stdout, "expiring")
 			}
 			return cli.RunExpiringUsage(ctx, args[1:], stdout, stderr)
+		case "notify":
+			if wantsHelp(args[1:]) {
+				return cli.WriteHelp(stdout, "notify")
+			}
+			ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return cli.RunNotify(ctx, args[1:], stderr)
 		case "reset-once":
 			if wantsHelp(args[1:]) {
 				return cli.WriteHelp(stdout, "reset-once")
@@ -98,6 +105,9 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := a.EnableResetEvents(); err != nil {
+		return fmt.Errorf("load reset events: %w", err)
+	}
 	a.EnableResetOnce()
 	go a.RunRefreshLoop(ctx)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

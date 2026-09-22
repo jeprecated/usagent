@@ -15,7 +15,7 @@
           pname = "usagent";
           inherit version;
           src = ./.;
-          vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
+          vendorHash = "sha256-g7tMp2rWtAoWlx8NrWcwcKJpw7DFMtJzH5OLG8fsWlU=";
           subPackages = [ "cmd/usagent" ];
           ldflags = [ "-s" "-w" ];
           meta = {

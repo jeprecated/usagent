@@ -31,6 +31,7 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("GET /v1/expiring-usage", api.expiringUsage)
 	mux.HandleFunc("GET /v1/recommendations/provider", api.providerRecommendations)
 	mux.HandleFunc("GET /v1/resets", api.resets)
+	mux.HandleFunc("GET /v1/reset-events", api.resetEvents)
 	mux.HandleFunc("GET /v1/availability", api.availability)
 	mux.HandleFunc("GET /v1/providers", api.providers)
 	mux.HandleFunc("GET /v1/chatgpt/reset-once", api.chatGPTResetOnceStatus)

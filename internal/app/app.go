@@ -22,22 +22,25 @@ import (
 	"github.com/jeprecated/usagent/internal/providers/noop"
 	"github.com/jeprecated/usagent/internal/providers/openai"
 	"github.com/jeprecated/usagent/internal/providers/zai"
+	"github.com/jeprecated/usagent/internal/resetevents"
 )
 
 type ProviderTiming struct{ RefreshMs, StaleMs int64 }
 
 type App struct {
-	Cfg             config.Config
-	Store           *cache.Store
-	History         *history.Store
-	Providers       []providers.Provider
-	Timings         map[string]ProviderTiming
-	StartedAt       int64
-	Logger          *slog.Logger
-	mu              sync.Mutex
-	inFlight        map[string]bool
-	resetMu         sync.Mutex
-	resetOnceDaemon atomic.Bool
+	Cfg               config.Config
+	Store             *cache.Store
+	History           *history.Store
+	Providers         []providers.Provider
+	Timings           map[string]ProviderTiming
+	StartedAt         int64
+	Logger            *slog.Logger
+	mu                sync.Mutex
+	inFlight          map[string]bool
+	resetMu           sync.Mutex
+	resetOnceDaemon   atomic.Bool
+	resetEventsDaemon atomic.Bool
+	ResetEvents       *resetevents.Store
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
@@ -111,7 +114,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		ps = append(ps, noop.New(id, label))
 		timings[id] = ProviderTiming{RefreshMs: cfg.Quota.RefreshMs, StaleMs: max(cfg.Quota.RefreshMs*3, int64((15*time.Minute)/time.Millisecond))}
 	}
-	return &App{Cfg: cfg, Store: cache.NewStore(cfg.Server.StatePath), History: history.NewStore(history.DefaultPath(cfg.Server.StatePath)), Providers: ps, Timings: timings, StartedAt: time.Now().UnixMilli(), Logger: logger, inFlight: map[string]bool{}}
+	return &App{ResetEvents: resetevents.New(cfg.Server.StatePath), Cfg: cfg, Store: cache.NewStore(cfg.Server.StatePath), History: history.NewStore(history.DefaultPath(cfg.Server.StatePath)), Providers: ps, Timings: timings, StartedAt: time.Now().UnixMilli(), Logger: logger, inFlight: map[string]bool{}}
 }
 
 func LabelFor(id string) string {
@@ -305,7 +308,21 @@ func (a *App) RefreshOne(ctx context.Context, p providers.Provider, now time.Tim
 	a.recordRefresh(p, result, err, now)
 }
 
+// EnableResetEvents is daemon-only: local CLI refreshes never write the event log.
+func (a *App) EnableResetEvents() error {
+	if err := a.ResetEvents.Load(); err != nil {
+		return err
+	}
+	a.resetEventsDaemon.Store(true)
+	return nil
+}
+
 func (a *App) recordRefresh(p providers.Provider, result providers.Result, err error, now time.Time) {
+	if err == nil && a.resetEventsDaemon.Load() {
+		if eventErr := a.ResetEvents.Record(p.ID(), result.Items, now); eventErr != nil {
+			a.Logger.Error("reset event recording failed", "provider", p.ID(), "error", eventErr)
+		}
+	}
 	timing := a.Timings[p.ID()]
 	if timing.RefreshMs <= 0 {
 		timing.RefreshMs = a.Cfg.Quota.RefreshMs

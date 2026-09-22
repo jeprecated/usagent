@@ -37,6 +37,9 @@ Package layout:
 - `internal/providers/custom` implements deterministic HTTP JSON mapping for user-defined providers.
 - `internal/providers/noop` keeps disabled provider metadata stable when requested by `usageView.providers`.
 - `internal/httpapi` exposes the stable HTTP contract.
+- `internal/resetevents` atomically persists successful comparison baselines and observed quota-replenishment events.
+- `internal/desktop` delivers desktop notifications and advances read state only on an explicit Mark read action.
+- `internal/atomicfile` writes private JSON state through fsynced temporary files and atomic rename.
 
 ## Server and client roles
 
@@ -129,6 +132,37 @@ Authorization: Bearer <runtime ZAI_API_KEY or GLM_API_KEY>
 
 HTTP callers never synchronously call provider APIs. The refresh loop checks provider `nextRefreshAt`, starts at most one in-flight refresh per provider, applies `refreshMs`/`staleMs`, and saves successful snapshots atomically to `server.statePath`. On startup the snapshot is loaded before serving.
 
+## Reset notifications
+
+`serve` enables reset-event recording before starting provider refreshes. Local
+CLI refreshes never write this log. Only successful fetches are compared, per
+provider and stable item/window/unit/limit. Visible fresh finite quota increasing
+by at least 10 percentage points produces an observed-replenishment event;
+changing the reset timestamp is neither sufficient nor required. Banked credit
+counts are excluded. First or newly reappearing items establish a baseline.
+
+`reset-events.json` holds a random stream ID, sequential event IDs, comparison
+baselines, and all events. Baselines and events commit together under one mutex;
+failed writes do not advance either in memory. Corrupt logs fail startup rather
+than silently resetting the stream. No retention cutoff discards unseen events.
+The one-central-daemon deployment remains the supported writer topology.
+
+`GET /v1/reset-events?stream=...&after=...` is cached-only and returns up to 100
+ordered events. A mismatched stream starts from the beginning, allowing clients
+to recover after deliberate daemon state replacement. There is no server-side
+acknowledgement mutation or shared cross-desktop read state.
+
+`usagent notify` runs in the graphical user session, reads only the selected
+daemon (never provider APIs or fallback daemons), and groups each page into one
+non-expiring freedesktop notification. It saves a per-daemon cursor locally only
+when the user invokes Mark read. Action IDs identify the exact displayed batch,
+so a late click on an older notification cannot mark newer events read. Failed
+delivery, expiry, DND/overflow removal, desktop shutdown, and shell restarts do
+not acknowledge events. A local file lock prevents duplicate watchers sharing a
+cursor. Notification-server actions are required; sticky display also requires
+that the shell honor the requested zero expiry. Noctalia's
+`notifications.respectExpireTimeout` must be true.
+
 ## JSON contract
 
 `GET /v1/usage` returns schema version 2:
@@ -178,6 +212,8 @@ V1 uses:
 
 - in-memory current state
 - atomic JSON snapshot on disk for restart hydration
+- durable JSON reset-event log for offline desktop catch-up
+- per-desktop acknowledgement cursor, separate from provider state
 
 No database in V1. Add SQLite/history later only if 24h trends are useful.
 

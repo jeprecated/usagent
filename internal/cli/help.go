@@ -17,6 +17,8 @@ func FormatHelp(command string, color bool) string {
 		text = usageHelp
 	case "expiring", "expiring-usage":
 		text = expiringHelp
+	case "notify":
+		text = notifyHelp
 	case "reset-once":
 		text = resetOnceHelp
 	case "mcp":
@@ -52,6 +54,7 @@ Usage:
   usagent usage [options]
   usagent expiring [options]
   usagent reset-once arm|status|cancel [options]
+  usagent notify [options]
   usagent mcp [options]
   usagent serve [options]
 
@@ -59,6 +62,7 @@ Commands:
   usage, status  Show current quota (default)
   expiring       Show quota likely to expire unused
   reset-once     Arm/cancel one ChatGPT reset at weekly exhaustion
+  notify         Watch for quota replenishments with sticky desktop alerts
   mcp            Start the stdio MCP server
   serve          Start the HTTP daemon
   help           Show this help
@@ -158,6 +162,29 @@ Options:
 If a redemption outcome is unknown, nothing is retried. Verify the credit and
 quota in ChatGPT before using cancel --acknowledge-unknown. This does not refund
 a credit or authorize another spend. Use arm separately only when ready.
+`
+
+const notifyHelp = `usagent notify — desktop alerts when quota replenishes
+
+Usage:
+  usagent notify [options]
+
+Reads saved reset events from the selected daemon only (no provider polling or
+local/alternate-daemon fallback). Missed alerts are grouped after login.
+Click Mark read to acknowledge; delivery, timeout, and closing a popup do not
+mark alerts read. Unread popups return on the next poll or login.
+Requires a Linux desktop notification service with action support.
+For Noctalia, enable Notifications > respect application expiry timeout.
+
+Options:
+  --config PATH       YAML config file
+  --daemon-url URL    Daemon HTTP(S) origin
+  --host HOST         Daemon host override
+  --port PORT         Daemon port override
+  --state PATH        Desktop acknowledgement file (default: XDG state, per daemon)
+  --interval DURATION Cached event poll interval (default 1m)
+  --timeout DURATION  HTTP request timeout (default 10s)
+  -h, --help          Show this help
 `
 
 const serveHelp = `usagent serve — start the HTTP daemon

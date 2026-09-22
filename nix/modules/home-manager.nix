@@ -16,6 +16,8 @@ in
   options.services.usagent = {
     enable = lib.mkEnableOption "usagent usage/quota microservice user service";
 
+    notifications.enable = lib.mkEnableOption "persistent desktop quota-replenishment alerts (can run without the local daemon)";
+
     package = lib.mkOption {
       type = lib.types.package;
       default = defaultPackage;
@@ -91,10 +93,10 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (cfg.enable || cfg.notifications.enable) {
     home.packages = [ cfg.package ];
 
-    systemd.user.services.usagent = {
+    systemd.user.services.usagent = lib.mkIf cfg.enable {
       Unit = {
         Description = "usagent usage/quota microservice";
         After = [ "network-online.target" ];
@@ -105,6 +107,20 @@ in
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
       };
       Install.WantedBy = [ "default.target" ];
+    };
+
+    systemd.user.services.usagent-notify = lib.mkIf cfg.notifications.enable {
+      Unit = {
+        Description = "usagent persistent quota reset notifications";
+        After = [ "graphical-session.target" "network-online.target" ];
+        PartOf = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${lib.getExe cfg.package} notify --config ${generatedConfig}";
+        Restart = "on-failure";
+        RestartSec = 10;
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
     };
   };
 }

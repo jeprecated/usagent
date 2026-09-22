@@ -111,6 +111,63 @@ Upgrade the central daemon before require-daemon clients. During version skew, a
 
 Finally, `usagent` observes account-scoped usage. It does not reserve quota, coordinate callers, or prevent simultaneous model requests from consuming the same account limits.
 
+## Desktop reset notifications
+
+Run `usagent notify` in your graphical session to get a notification when remaining
+quota jumps up by **10 percentage points or more** between successful provider
+refreshes. This observes replenishment (including manual resets), not merely a
+scheduled reset time passing. First readings, small corrections, stale/error
+items, changed limits/units, and banked reset-credit counts do not trigger alerts.
+
+```sh
+usagent notify --config ~/.config/usagent/config.yaml
+# Or select a remote daemon:
+usagent notify --config ~/.config/usagent/config.yaml --daemon-url http://lattice:8788
+```
+
+The daemon records events in `reset-events.json` next to its snapshot. Events and
+comparison baselines survive daemon restarts. The desktop fetches the cached feed
+every minute, without calling providers or falling back to another daemon/local
+refresh. `client.mode: local-only` is rejected. Detection still follows normal
+provider polling (at least 5 minutes for ChatGPT and 15 minutes for Claude).
+
+**Click Mark read to clear alerts.** Delivery, popup expiry, and closing with the
+window's close button are not acknowledgements: shells can also close popups
+without user input. Unread popups return on the next desktop poll or login.
+Missed events are grouped into one notification (up to 100 per batch); Mark read
+acknowledges that batch. Further batches appear next. Acknowledgements are saved
+locally under XDG state, separately for each daemon. Each desktop tracks its own
+read state. Only one watcher may use a given acknowledgement file at a time.
+
+Notifications request no expiry and remain eligible for desktop history. The
+notification server must support actions. **In Noctalia, enable
+`notifications.respectExpireTimeout = true`** so it honors the no-expiry request.
+Shell popup limits/DND may still hide a popup; they never clear usagent's unread
+state. Noctalia settings managed by Home Manager must be changed in their Nix
+source, not by overwriting the generated settings file.
+
+For startup at graphical login, the Home Manager module supports a separate
+notification service, including on pure clients without a local daemon:
+
+```nix
+services.usagent = {
+  notifications.enable = true;
+  config.client = {
+    url = "http://lattice:8788";
+    mode = "require-daemon";
+  };
+};
+# If using Noctalia's Home Manager module:
+programs.noctalia-shell.settings.notifications.respectExpireTimeout = true;
+```
+
+Upgrade/restart the daemon before enabling desktop notifications. The daemon must
+remain running somewhere to observe resets while your desktop is offline. Events
+are retained without automatic expiry, so missed alerts are not silently dropped;
+the log can grow over time. Back up `reset-events.json` with the daemon snapshot.
+A corrupt event log fails daemon startup rather than discarding alerts. Removing
+it intentionally starts a new event stream, not a continuation of old IDs.
+
 ## Endpoints
 
 - `GET /healthz`
@@ -120,6 +177,7 @@ Finally, `usagent` observes account-scoped usage. It does not reserve quota, coo
 - `GET /v1/expiring-usage`
 - `GET /v1/recommendations/provider`
 - `GET /v1/resets`
+- `GET /v1/reset-events?stream=<streamId>&after=<eventId>` (observed replenishments; cached-only, 100 per page)
 - `GET /v1/availability`
 - `GET /v1/providers`
 - `GET /v1/chatgpt/reset-credits`
