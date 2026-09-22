@@ -194,6 +194,7 @@ After a successful consume, `usagent` refreshes the ChatGPT provider so `/v1/usa
 
 ```sh
 usagent reset-once arm
+usagent reset-once arm --now # explicit immediate fresh check (for scripts)
 usagent reset-once status
 usagent reset-once cancel
 ```
@@ -207,12 +208,13 @@ Requirements:
 - The HTTP daemon must be running the version that includes `reset-once`. Local CLI refreshes never redeem.
 - Control commands must connect directly over loopback (`127.0.0.1` / `::1` / `localhost`). Wildcard listeners (`0.0.0.0` / `::`) are supported: remote usage readers can use the same daemon, but remote reset control is rejected. If the configured client URL uses a network address, run on the daemon host with `--daemon-url http://127.0.0.1:8788`. A daemon bound only to a specific network IP must also be configured to accept loopback connections.
 - `allowResetConsume` is **not** required for `reset-once`. Manual consume still requires that config flag.
-- Detection uses the normal ChatGPT refresh cadence (usually five minutes), not instantaneous exhaustion.
+- Detection normally uses the ChatGPT refresh cadence (usually five minutes). When run interactively, `arm` checks cached weekly usage and, if it shows zero remaining, **offers** to use one reset now. Only an explicit yes sends a separate `use-now` request. `arm --now` makes that explicit request without prompting (including when already armed). The daemon still performs two fresh account-bound weekly checks and a credit listing under the reset-once lock before redeeming; a recovered window stays armed and spends nothing. JSON/non-interactive `arm` without `--now` never spends immediately.
 
 Local control API (loopback peer, no `Origin`, no forwarded-client headers, explicit action header + JSON confirm):
 
 - `GET /v1/chatgpt/reset-once`
 - `POST /v1/chatgpt/reset-once/arm` with `x-usagent-action: arm-chatgpt-reset-once`
+- `POST /v1/chatgpt/reset-once/use-now` with `x-usagent-action: use-now-chatgpt-reset-once` (already armed, explicit second confirmation)
 - `POST /v1/chatgpt/reset-once/cancel` with `x-usagent-action: cancel-chatgpt-reset-once`
 
 `usagent` usage output includes the current `ChatGPT reset-once:` line when the toggle is not `off`.

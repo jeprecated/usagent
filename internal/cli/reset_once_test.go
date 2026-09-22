@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jeprecated/usagent/internal/model"
 )
@@ -23,6 +24,60 @@ func resetCLIConfig(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestResetOnceArmOffersImmediateUseOnlyWithConfirmation(t *testing.T) {
+	configPath := resetCLIConfig(t)
+	for _, tc := range []struct {
+		name, input                      string
+		interactive, jsonOutput, nowFlag bool
+		wantPosts                        int
+	}{
+		{"yes", "yes\n", true, false, false, 2},
+		{"no", "n\n", true, false, false, 1},
+		{"noninteractive", "yes\n", false, false, false, 1},
+		{"json", "yes\n", true, true, false, 1},
+		{"explicit-now", "", false, true, true, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/usage":
+					fmt.Fprintf(w, `{"quotaItems":[{"provider":"chatgpt","window":{"id":"weekly"},"state":"fresh","remaining":0,"refresh":{"staleAt":%d}}]}`, time.Now().Add(time.Hour).UnixMilli())
+				case "/v1/chatgpt/reset-once/arm":
+					posts.Add(1)
+					fmt.Fprint(w, `{"version":1,"status":"armed"}`)
+				case "/v1/chatgpt/reset-once/use-now":
+					posts.Add(1)
+					if r.Header.Get("X-Usagent-Action") != "use-now-chatgpt-reset-once" {
+						t.Error("missing immediate-use action")
+					}
+					fmt.Fprint(w, `{"version":1,"status":"consumed"}`)
+				default:
+					t.Errorf("unexpected route %s", r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+			args := []string{"arm", "--config", configPath, "--daemon-url", srv.URL}
+			if tc.jsonOutput {
+				args = append(args, "--json")
+			}
+			if tc.nowFlag {
+				args = append(args, "--now")
+			}
+			var stdout, stderr bytes.Buffer
+			if err := runResetOnce(context.Background(), args, strings.NewReader(tc.input), tc.interactive, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if int(posts.Load()) != tc.wantPosts {
+				t.Fatalf("posts=%d output=%q", posts.Load(), stdout.String())
+			}
+			if tc.interactive && !tc.jsonOutput && !tc.nowFlag && !strings.Contains(stdout.String(), "Use one banked reset now?") {
+				t.Fatalf("missing offer: %q", stdout.String())
+			}
+		})
+	}
 }
 
 func TestResetOnceCLICommands(t *testing.T) {

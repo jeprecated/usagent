@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +22,17 @@ import (
 )
 
 func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	in, inErr := os.Stdin.Stat()
+	outFile, ok := stdout.(*os.File)
+	interactive := ok && inErr == nil && in.Mode()&os.ModeCharDevice != 0
+	if interactive {
+		out, err := outFile.Stat()
+		interactive = err == nil && out.Mode()&os.ModeCharDevice != 0
+	}
+	return runResetOnce(ctx, args, os.Stdin, interactive, stdout, stderr)
+}
+
+func runResetOnce(ctx context.Context, args []string, stdin io.Reader, interactive bool, stdout, stderr io.Writer) error {
 	if len(args) == 0 || (args[0] != "arm" && args[0] != "status" && args[0] != "cancel") {
 		return errors.New("usage: usagent reset-once arm|status|cancel [options]")
 	}
@@ -27,7 +40,7 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs := flag.NewFlagSet("usagent reset-once", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	opts := UsageOptions{ConfigPath: config.DefaultConfigPath(), Timeout: 10 * time.Second}
-	var acknowledge bool
+	var acknowledge, nowRequested bool
 	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "YAML config file")
 	fs.StringVar(&opts.DaemonURL, "daemon-url", "", "local daemon origin")
 	fs.StringVar(&opts.Host, "host", "", "local daemon host")
@@ -35,12 +48,13 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs.DurationVar(&opts.Timeout, "timeout", opts.Timeout, "request timeout")
 	fs.BoolVar(&opts.JSON, "json", false, "print JSON")
 	fs.BoolVar(&acknowledge, "acknowledge-unknown", false, "acknowledge an outcome already manually reconciled")
+	fs.BoolVar(&nowRequested, "now", false, "after arming, immediately check fresh weekly usage and use one credit if exhausted")
 	var provider string
 	fs.StringVar(&provider, "provider", "chatgpt", "chatgpt or claude-code")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || (acknowledge && action != "cancel") {
+	if fs.NArg() != 0 || (acknowledge && action != "cancel") || (nowRequested && action != "arm") {
 		return errors.New("unexpected reset-once arguments; --acknowledge-unknown is only valid for cancel")
 	}
 	fs.Visit(func(f *flag.Flag) {
@@ -76,10 +90,60 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return err
 	}
+	if nowRequested && route != "/v1/chatgpt/reset-once" {
+		return errors.New("--now is currently supported only for chatgpt")
+	}
+	confirm = action + "-" + confirm
+	if opts.Timeout <= 0 {
+		return errors.New("--timeout must be positive")
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+	// Never route spending authority through an environment-configured proxy,
+	// redirect, alternate daemon or local fallback after an ambiguous response.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	state, err := requestResetOnce(ctx, client, u, route, action, confirm, acknowledge)
+	if err != nil {
+		return err
+	}
+	if action == "arm" && state.Status == "armed" {
+		useNow := nowRequested
+		if !useNow && interactive && !opts.JSON && route == "/v1/chatgpt/reset-once" && cachedChatGPTWeeklyEmpty(ctx, client, u) {
+			if _, err := fmt.Fprint(stdout, "ChatGPT weekly usage is at 0. Use one banked reset now? [y/N] "); err != nil {
+				return err
+			}
+			line, _ := bufio.NewReader(stdin).ReadString('\n')
+			useNow = strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes")
+		}
+		if useNow {
+			// Give the live double-check its own timeout; time spent reading the
+			// human confirmation must not consume the redemption request budget.
+			nowCtx, cancelNow := context.WithTimeout(parentCtx, max(opts.Timeout, 40*time.Second))
+			defer cancelNow()
+			state, err = requestResetOnce(nowCtx, client, u, route, "use-now", "use-now-chatgpt-reset-once", false)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if opts.JSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(state)
+	}
+	_, err = fmt.Fprintln(stdout, formatResetOnceLabel(label, state))
+	return err
+}
+
+func requestResetOnce(ctx context.Context, client *http.Client, origin *url.URL, route, action, confirm string, acknowledge bool) (model.ResetOnceState, error) {
+	u := *origin
 	u.Path = route
 	method := http.MethodGet
 	var body io.Reader
-	confirm = action + "-" + confirm
 	if action != "status" {
 		u.Path += "/" + action
 		method = http.MethodPost
@@ -89,28 +153,17 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}{confirm, acknowledge})
 		body = bytes.NewReader(b)
 	}
-	if opts.Timeout <= 0 {
-		return errors.New("--timeout must be positive")
-	}
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return err
+		return model.ResetOnceState{}, err
 	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Usagent-Action", confirm)
 	}
-	// Never route spending authority through an environment-configured proxy,
-	// redirect, alternate daemon or local fallback after an ambiguous response.
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("reset-once request failed; check status before retrying: %w", err)
+		return model.ResetOnceState{}, fmt.Errorf("reset-once request failed; check status before retrying: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -120,22 +173,45 @@ func RunResetOnce(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			} `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&body)
-		return fmt.Errorf("reset-once HTTP %d: %s; do not retry blindly; check status", resp.StatusCode, body.Error.Message)
+		return model.ResetOnceState{}, fmt.Errorf("reset-once HTTP %d: %s; do not retry blindly; check status", resp.StatusCode, body.Error.Message)
 	}
-	var state model.ChatGPTResetOnce
+	var state model.ResetOnceState
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16384)).Decode(&state); err != nil {
-		return fmt.Errorf("invalid reset-once response; check status before retrying: %w", err)
+		return state, fmt.Errorf("invalid reset-once response; check status before retrying: %w", err)
 	}
 	if state.Version != 1 || state.Status == "" {
-		return errors.New("invalid reset-once response; check status before retrying")
+		return state, errors.New("invalid reset-once response; check status before retrying")
 	}
-	if opts.JSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(state)
+	return state, nil
+}
+
+// Cached usage is only a hint for the interactive offer. The daemon performs
+// two fresh account-bound checks before any actual redemption.
+func cachedChatGPTWeeklyEmpty(ctx context.Context, client *http.Client, origin *url.URL) bool {
+	u := *origin
+	u.Path = "/v1/usage"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return false
 	}
-	_, err = fmt.Fprintln(stdout, formatResetOnceLabel(label, state))
-	return err
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var usage model.Usage
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&usage) != nil {
+		return false
+	}
+	for _, item := range usage.QuotaItems {
+		if item.Provider == "chatgpt" && item.Window.ID == "weekly" && item.State == "fresh" && item.Remaining <= 0 && item.Refresh != nil && item.Refresh.StaleAt > time.Now().UnixMilli() {
+			return true
+		}
+	}
+	return false
 }
 
 func resetOnceRoute(provider string) (path, confirm, label string, err error) {

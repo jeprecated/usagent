@@ -148,6 +148,29 @@ func (f *resetFixture) restart(daemon bool) {
 	}
 }
 
+func TestUseChatGPTResetOnceNowRechecksAndConsumesOnlyOnce(t *testing.T) {
+	f := newResetFixture(t)
+	f.arm()
+	state, err := f.app.UseChatGPTResetOnceNow(context.Background(), f.now)
+	if err != nil || state.Status != "consumed" || f.posts.Load() != 1 || f.gets.Load() < 2 {
+		t.Fatalf("state=%+v err=%v posts=%d gets=%d", state, err, f.posts.Load(), f.gets.Load())
+	}
+	_, err = f.app.UseChatGPTResetOnceNow(context.Background(), f.now)
+	if err != nil || f.posts.Load() != 1 {
+		t.Fatalf("second use: err=%v posts=%d", err, f.posts.Load())
+	}
+}
+
+func TestUseChatGPTResetOnceNowDoesNotSpendRecoveredWindow(t *testing.T) {
+	f := newResetFixture(t)
+	f.arm()
+	f.usage.Store(weeklyUsage(99))
+	state, err := f.app.UseChatGPTResetOnceNow(context.Background(), f.now)
+	if err != nil || state.Status != "armed" || f.posts.Load() != 0 || f.lists.Load() != 0 {
+		t.Fatalf("state=%+v err=%v posts=%d lists=%d", state, err, f.posts.Load(), f.lists.Load())
+	}
+}
+
 func TestResetOnceConsumesExactlyOneEarliestExpiringCredit(t *testing.T) {
 	f := newResetFixture(t)
 	first := f.arm()

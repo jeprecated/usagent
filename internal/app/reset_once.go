@@ -203,6 +203,32 @@ func (a *App) resetOnceFailed(s model.ChatGPTResetOnce, message string, now time
 	}
 }
 
+// UseChatGPTResetOnceNow runs the same guarded refresh as the scheduler, but
+// only following a separate, explicit confirmation from the local caller.
+func (a *App) UseChatGPTResetOnceNow(ctx context.Context, now time.Time) (model.ChatGPTResetOnce, error) {
+	if !a.resetOnceDaemon.Load() {
+		return model.ChatGPTResetOnce{}, errors.New("reset-once requires the running daemon")
+	}
+	unlock, err := a.lockResetOnce()
+	if err != nil {
+		return model.ChatGPTResetOnce{}, err
+	}
+	defer unlock()
+	s, err := a.readResetOnce()
+	if err != nil {
+		return s, err
+	}
+	if s.Status != "armed" {
+		return s, nil
+	}
+	p := a.chatGPTProvider()
+	if p == nil {
+		return s, errors.New("chatgpt provider is not enabled")
+	}
+	a.refreshChatGPTResetOnceLocked(ctx, p, now)
+	return a.readResetOnce()
+}
+
 func (a *App) refreshChatGPTResetOnce(ctx context.Context, p *chatgpt.Provider, now time.Time) {
 	// Hold the lock across the fresh check, credit selection, durable claim and
 	// POST. Competing daemons/manual consumers/cancellation cannot interleave.
@@ -212,6 +238,10 @@ func (a *App) refreshChatGPTResetOnce(ctx context.Context, p *chatgpt.Provider, 
 		return
 	}
 	defer unlock()
+	a.refreshChatGPTResetOnceLocked(ctx, p, now)
+}
+
+func (a *App) refreshChatGPTResetOnceLocked(ctx context.Context, p *chatgpt.Provider, now time.Time) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	s, err := a.readResetOnce()

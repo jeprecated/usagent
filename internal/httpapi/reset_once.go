@@ -82,9 +82,12 @@ func (api API) setChatGPTResetOnce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var state model.ChatGPTResetOnce
-	if action == "arm" {
+	switch action {
+	case "arm":
 		state, err = api.App.ArmChatGPTResetOnce(time.Now())
-	} else {
+	case "use-now":
+		state, err = api.App.UseChatGPTResetOnceNow(r.Context(), time.Now())
+	case "cancel":
 		state, err = api.App.CancelChatGPTResetOnce(req.AcknowledgeUnknown, time.Now())
 	}
 	if err != nil {

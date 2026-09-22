@@ -36,6 +36,7 @@ func (api API) routes() http.Handler {
 	mux.HandleFunc("GET /v1/providers", api.providers)
 	mux.HandleFunc("GET /v1/chatgpt/reset-once", api.chatGPTResetOnceStatus)
 	mux.HandleFunc("POST /v1/chatgpt/reset-once/arm", api.setChatGPTResetOnce)
+	mux.HandleFunc("POST /v1/chatgpt/reset-once/use-now", api.setChatGPTResetOnce)
 	mux.HandleFunc("POST /v1/chatgpt/reset-once/cancel", api.setChatGPTResetOnce)
 	mux.HandleFunc("GET /v1/chatgpt/reset-credits", api.chatGPTResetCredits)
 	mux.HandleFunc("POST /v1/chatgpt/reset-credits/consume", api.consumeChatGPTResetCredit)

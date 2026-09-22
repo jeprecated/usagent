@@ -146,12 +146,15 @@ Uses the earliest-expiring eligible credit, then disarms. Repeated arm commands
 never stack credits. Authorization survives daemon restarts. Only the running
 daemon can redeem automatically; local usage refreshes never spend. Control it
 through a direct loopback connection; remote usage readers remain supported.
-The check runs on the normal provider refresh cadence. No recurring-auto-reset
-configuration or allowResetConsume change is needed. ChatGPT and Claude Code
-toggles are independent.
+The check runs on the normal provider refresh cadence. For ChatGPT, interactive
+arm offers immediate use when cached weekly usage is zero; confirmation makes
+the daemon recheck live usage before spending. In scripts, use arm --now to
+explicitly request the same immediate check. No recurring-auto-reset config
+or allowResetConsume change is needed. Provider toggles are independent.
 
 Options:
   --provider NAME        chatgpt (default) or claude-code
+  --now                  ChatGPT arm: run a fresh spend check immediately
   --config PATH          YAML config file
   --daemon-url URL       Local daemon HTTP(S) origin (no remote/fallback)
   --host HOST            Loopback daemon host

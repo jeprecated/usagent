@@ -74,7 +74,7 @@ func TestResetOnceAPIArmStatusCancel(t *testing.T) {
 }
 
 func TestResetOnceAPIRejectsUnsafeRequests(t *testing.T) {
-	for _, action := range []string{"arm", "cancel"} {
+	for _, action := range []string{"arm", "cancel", "use-now"} {
 		for name, mutate := range map[string]func(*http.Request){
 			"remote":             func(r *http.Request) { r.RemoteAddr = "192.0.2.1:1234" },
 			"invalid-peer":       func(r *http.Request) { r.RemoteAddr = "localhost:1234" },
@@ -112,6 +112,14 @@ func TestResetOnceAPIRejectsUnsafeRequests(t *testing.T) {
 			})
 		}
 	}
+	t.Run("use-now-cannot-arm", func(t *testing.T) {
+		a, h := resetAPI(t)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, resetRequest("use-now"))
+		if rec.Code != 200 || a.ChatGPTResetOnceStatus().Status != "off" {
+			t.Fatalf("immediate use could arm: %d %s", rec.Code, rec.Body.String())
+		}
+	})
 	t.Run("get-cannot-arm", func(t *testing.T) {
 		a, h := resetAPI(t)
 		r := resetRequest("arm")
