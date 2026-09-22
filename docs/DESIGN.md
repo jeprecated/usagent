@@ -38,7 +38,7 @@ Package layout:
 - `internal/providers/noop` keeps disabled provider metadata stable when requested by `usageView.providers`.
 - `internal/httpapi` exposes the stable HTTP contract.
 - `internal/resetevents` atomically persists successful comparison baselines and observed quota-replenishment events.
-- `internal/desktop` delivers desktop notifications and advances read state only on an explicit Mark read action.
+- `internal/desktop` filters desktop notifications, skips ignored events, and marks matching alerts read only on an explicit Mark read action.
 - `internal/atomicfile` writes private JSON state through fsynced temporary files and atomic rename.
 
 ## Server and client roles
@@ -142,7 +142,8 @@ changing the reset timestamp is neither sufficient nor required. Banked credit
 counts are excluded. First or newly reappearing items establish a baseline.
 
 `reset-events.json` holds a random stream ID, sequential event IDs, comparison
-baselines, and all events. Baselines and events commit together under one mutex;
+baselines, and all events. New events include the window kind for desktop filtering;
+older events retain their display window label. Baselines and events commit together under one mutex;
 failed writes do not advance either in memory. Corrupt logs fail startup rather
 than silently resetting the stream. No retention cutoff discards unseen events.
 The one-central-daemon deployment remains the supported writer topology.
@@ -153,9 +154,17 @@ to recover after deliberate daemon state replacement. There is no server-side
 acknowledgement mutation or shared cross-desktop read state.
 
 `usagent notify` runs in the graphical user session, reads only the selected
-daemon (never provider APIs or fallback daemons), and groups each page into one
-non-expiring freedesktop notification. It saves a per-daemon cursor locally only
-when the user invokes Mark read. Action IDs identify the exact displayed batch,
+daemon (never provider APIs or fallback daemons), and filters for weekly/monthly
+replenishments plus 5-hour/session replenishments whose pre-reset remaining quota
+was strictly below 20%. Other windows are silent. Older events without a window
+kind use known window labels (including Claude's Fable and monthly extra quota).
+The daemon log remains unfiltered.
+
+Matching events in each page are grouped into one non-expiring freedesktop
+notification. Pages containing only ignored events advance the local per-daemon
+cursor automatically; full ignored pages are drained immediately. Matching alerts
+advance the cursor only when the user invokes Mark read. Action IDs identify the
+last matching event in the exact displayed batch,
 so a late click on an older notification cannot mark newer events read. Failed
 delivery, expiry, DND/overflow removal, desktop shutdown, and shell restarts do
 not acknowledge events. A local file lock prevents duplicate watchers sharing a

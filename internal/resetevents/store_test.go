@@ -96,7 +96,7 @@ func TestRestartPreservesBaselinesAndCatchup(t *testing.T) {
 	s = loaded(t, path)
 	record(t, s, quota(100), 3)
 	p := page(t, s)
-	if p.StreamID != stream || len(p.Events) != 1 || p.Events[0].BeforePercent != 4 || p.Events[0].AfterPercent != 100 {
+	if p.StreamID != stream || len(p.Events) != 1 || p.Events[0].BeforePercent != 4 || p.Events[0].AfterPercent != 100 || p.Events[0].WindowKind != "weekly" {
 		t.Fatalf("unexpected catchup: %+v", p)
 	}
 	p, err := s.Page(stream, 1)

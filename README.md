@@ -119,6 +119,13 @@ refreshes. This observes replenishment (including manual resets), not merely a
 scheduled reset time passing. First readings, small corrections, stale/error
 items, changed limits/units, and banked reset-credit counts do not trigger alerts.
 
+Desktop alerts show **weekly and monthly** replenishments at any remaining level.
+**5-hour/session** replenishments alert only when the last observed remaining quota
+was **below 20% before replenishment** (exactly 20% is silent). Other windows are
+silent. For example, Claude 5h `64% → 100%` is skipped; `19% → 100%` alerts.
+The daemon still records all replenishments; this filter applies only to desktop
+notifications, including previously recorded events.
+
 ```sh
 usagent notify --config ~/.config/usagent/config.yaml
 # Or select a remote daemon:
@@ -137,7 +144,9 @@ without user input. Unread popups return on the next desktop poll or login.
 Missed events are grouped into one notification (up to 100 per batch); Mark read
 acknowledges that batch. Further batches appear next. Acknowledgements are saved
 locally under XDG state, separately for each daemon. Each desktop tracks its own
-read state. Only one watcher may use a given acknowledgement file at a time.
+read state. Filtered-out events are skipped automatically without marking any
+wanted alerts read, so silent batches cannot block later alerts. Only one watcher
+may use a given acknowledgement file at a time.
 
 Notifications request no expiry and remain eligible for desktop history. The
 notification server must support actions. **In Noctalia, enable

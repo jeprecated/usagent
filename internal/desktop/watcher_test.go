@@ -31,7 +31,7 @@ func (f *fakeNotifier) Signals() <-chan Signal             { return f.signals }
 func events(ids ...uint64) resetevents.Page {
 	p := resetevents.Page{StreamID: "stream"}
 	for _, id := range ids {
-		p.Events = append(p.Events, resetevents.Event{ID: id, Label: "Claude weekly", BeforePercent: 4, AfterPercent: 100})
+		p.Events = append(p.Events, resetevents.Event{ID: id, Label: "Claude weekly", Window: "W", BeforePercent: 4, AfterPercent: 100})
 	}
 	return p
 }

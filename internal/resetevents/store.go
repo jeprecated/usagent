@@ -26,6 +26,7 @@ type Event struct {
 	ItemID        string  `json:"itemId"`
 	Label         string  `json:"label"`
 	Window        string  `json:"window"`
+	WindowKind    string  `json:"windowKind,omitempty"`
 	ObservedAt    int64   `json:"observedAt"`
 	BeforePercent float64 `json:"beforePercent"`
 	AfterPercent  float64 `json:"afterPercent"`
@@ -146,7 +147,7 @@ func (s *Store) Record(provider string, items []model.QuotaItem, now time.Time) 
 		if after-before+1e-9 < MinimumIncrease {
 			continue
 		}
-		next.Events = append(next.Events, Event{ID: uint64(len(next.Events) + 1), Provider: provider, ItemID: item.ID, Label: item.Label, Window: item.Window.Label, ObservedAt: now.UnixMilli(), BeforePercent: before, AfterPercent: after})
+		next.Events = append(next.Events, Event{ID: uint64(len(next.Events) + 1), Provider: provider, ItemID: item.ID, Label: item.Label, Window: item.Window.Label, WindowKind: item.Window.Kind, ObservedAt: now.UnixMilli(), BeforePercent: before, AfterPercent: after})
 	}
 	next.Baselines[provider] = baseline{Items: valid, ObservedAt: now.UnixMilli()}
 	if s.path != "" {

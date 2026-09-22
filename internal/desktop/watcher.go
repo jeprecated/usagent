@@ -45,7 +45,7 @@ type Watcher struct {
 }
 
 // Run retries outages on the ordinary desktop poll interval. It never polls
-// provider APIs. Only the explicit action advances the durable desktop cursor.
+// provider APIs. Alerts require an explicit action; filtered events are skipped.
 func (w *Watcher) Run(ctx context.Context, interval time.Duration) error {
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -75,12 +75,22 @@ func (w *Watcher) Run(ctx context.Context, interval time.Duration) error {
 }
 
 func (w *Watcher) poll(ctx context.Context) {
-	page, err := w.Fetch(ctx, w.Cursor)
-	if err == nil {
-		err = w.present(ctx, page)
-	}
-	if err != nil && ctx.Err() == nil && w.Log != nil {
-		fmt.Fprintf(w.Log, "reset notifications: %v; will retry\n", err)
+	for ctx.Err() == nil {
+		before := w.Cursor
+		page, err := w.Fetch(ctx, w.Cursor)
+		if err == nil {
+			err = w.present(ctx, page)
+		}
+		if err != nil {
+			if ctx.Err() == nil && w.Log != nil {
+				fmt.Fprintf(w.Log, "reset notifications: %v; will retry\n", err)
+			}
+			return
+		}
+		// Drain full pages of ignored events without waiting another poll interval.
+		if len(page.Events) < resetevents.PageSize || w.Cursor == before {
+			return
+		}
 	}
 }
 
@@ -108,12 +118,26 @@ func (w *Watcher) present(ctx context.Context, page resetevents.Page) error {
 	if len(page.Events) == 0 {
 		return nil
 	}
-	last := page.Events[len(page.Events)-1].ID
+	var alerts []resetevents.Event
+	for _, event := range page.Events {
+		if shouldNotify(event) {
+			alerts = append(alerts, event)
+		}
+	}
+	if len(alerts) == 0 {
+		cursor := Cursor{Origin: w.Cursor.Origin, StreamID: page.StreamID, After: after}
+		if err := w.Save(cursor); err != nil {
+			return fmt.Errorf("save skipped notification events: %w", err)
+		}
+		w.Cursor = cursor
+		return nil
+	}
+	last := alerts[len(alerts)-1].ID
 	if w.id != 0 && last == w.shownLast {
 		return nil
 	}
 	action := fmt.Sprintf("read:%s:%d", page.StreamID, last)
-	id, err := w.Notifier.Show(ctx, w.id, formatNotification(page.Events, action))
+	id, err := w.Notifier.Show(ctx, w.id, formatNotification(alerts, action))
 	if err != nil {
 		return err
 	}
@@ -151,6 +175,32 @@ func (w *Watcher) handle(ctx context.Context, sig Signal) error {
 		w.id = 0
 	}
 	return nil
+}
+
+// Older stored events have only a display window label, not a window kind.
+func shouldNotify(event resetevents.Event) bool {
+	kind := event.WindowKind
+	window := strings.ToLower(strings.TrimSpace(event.Window))
+	if kind == "" {
+		switch window {
+		case "w", "weekly":
+			kind = "weekly"
+		case "m", "monthly":
+			kind = "monthly"
+		case "f":
+			if event.Provider == "claude-code" {
+				kind = "weekly"
+			}
+		case "extra":
+			if event.Provider == "claude-code" {
+				kind = "monthly"
+			}
+		}
+	}
+	if kind == "weekly" || kind == "monthly" {
+		return true
+	}
+	return (window == "s" || window == "5h") && event.BeforePercent < 20
 }
 
 func formatNotification(events []resetevents.Event, action string) Notification {
