@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,11 +25,19 @@ const (
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Client    ClientConfig    `yaml:"client"`
-	Providers ProvidersConfig `yaml:"providers"`
-	UsageView UsageViewConfig `yaml:"usageView"`
-	Quota     QuotaConfig     `yaml:"quota"`
+	Server        ServerConfig       `yaml:"server"`
+	Client        ClientConfig       `yaml:"client"`
+	Providers     ProvidersConfig    `yaml:"providers"`
+	UsageView     UsageViewConfig    `yaml:"usageView"`
+	Quota         QuotaConfig        `yaml:"quota"`
+	Notifications NotificationConfig `yaml:"notifications"`
+}
+
+// NotificationConfig is a desktop-local policy; daemon event recording is unfiltered.
+type NotificationConfig struct {
+	Weekly              bool    `yaml:"weekly"`
+	Monthly             bool    `yaml:"monthly"`
+	SessionBelowPercent float64 `yaml:"sessionBelowPercent"`
 }
 
 type ClientMode string
@@ -239,8 +248,9 @@ type CLIOptions struct {
 
 func Default() Config {
 	return Config{
-		Server: ServerConfig{Host: "127.0.0.1", Port: 8787, ReadAuth: ReadAuth{Mode: "none"}, StatePath: "%STATE%/usagent/snapshot.json"},
-		Client: ClientConfig{Mode: ClientModePreferDaemon},
+		Server:        ServerConfig{Host: "127.0.0.1", Port: 8787, ReadAuth: ReadAuth{Mode: "none"}, StatePath: "%STATE%/usagent/snapshot.json"},
+		Client:        ClientConfig{Mode: ClientModePreferDaemon},
+		Notifications: NotificationConfig{Weekly: true, Monthly: true, SessionBelowPercent: 20},
 		Providers: ProvidersConfig{
 			ClaudeOAuth: ClaudeOAuthConfig{Enabled: false, CredentialsPath: "~/.claude/.credentials.json", EndpointURL: "https://api.anthropic.com/api/oauth/usage", BetaHeader: "oauth-2025-04-20"},
 			ChatGPT:     ChatGPTConfig{Enabled: false, AuthPath: "~/.codex/auth.json", EndpointURL: "https://chatgpt.com/backend-api/wham/usage", ResetCreditsEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", ResetConsumeEndpointURL: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", TokenEnv: "CHATGPT_ACCESS_TOKEN", AccountIDEnv: "CHATGPT_ACCOUNT_ID", UserAgent: "usagent/0.1"},
@@ -307,6 +317,10 @@ func LoadWithOverrides(path string, opts CLIOptions) (Config, error) {
 }
 
 func Normalize(cfg Config) (Config, error) {
+	threshold := cfg.Notifications.SessionBelowPercent
+	if math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 100 {
+		return cfg, fmt.Errorf("notifications.sessionBelowPercent must be a finite number from 0 to 100")
+	}
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "127.0.0.1"
 	}

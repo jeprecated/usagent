@@ -119,12 +119,17 @@ refreshes. This observes replenishment (including manual resets), not merely a
 scheduled reset time passing. First readings, small corrections, stale/error
 items, changed limits/units, and banked reset-credit counts do not trigger alerts.
 
-Desktop alerts show **weekly and monthly** replenishments at any remaining level.
+By default, desktop alerts show **weekly and monthly** replenishments at any remaining level.
 **5-hour/session** replenishments alert only when the last observed remaining quota
 was **below 20% before replenishment** (exactly 20% is silent). Other windows are
 silent. For example, Claude 5h `64% → 100%` is skipped; `19% → 100%` alerts.
 The daemon still records all replenishments; this filter applies only to desktop
-notifications, including previously recorded events.
+notifications, including previously recorded events. Configure the local notifier's
+YAML `notifications.weekly`, `notifications.monthly`, and
+`notifications.sessionBelowPercent` settings (defaults: `true`, `true`, `20`). The
+threshold accepts 0–100; `0` disables session alerts. Restart the notification
+service after changing preferences. Events already skipped by this desktop are
+not replayed when preferences change.
 
 ```sh
 usagent notify --config ~/.config/usagent/config.yaml
@@ -161,9 +166,16 @@ notification service, including on pure clients without a local daemon:
 ```nix
 services.usagent = {
   notifications.enable = true;
-  config.client = {
-    url = "http://lattice:8788";
-    mode = "require-daemon";
+  config = {
+    notifications = {
+      weekly = true;
+      monthly = true;
+      sessionBelowPercent = 20; # 0 disables 5-hour/session alerts
+    };
+    client = {
+      url = "http://lattice:8788";
+      mode = "require-daemon";
+    };
   };
 };
 # If using Noctalia's Home Manager module:

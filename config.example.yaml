@@ -13,6 +13,14 @@ client:
   url: ""
   mode: "prefer-daemon" # prefer-daemon | require-daemon | local-only
 
+# Desktop-local alert preferences; the daemon still records every replenishment.
+notifications:
+  weekly: true
+  monthly: true
+  # Alert only below this remaining percentage BEFORE session replenishment.
+  # Range: 0..100. Exactly the threshold is silent; 0 disables session alerts.
+  sessionBelowPercent: 20
+
 providers:
   claudeOAuth:
     enabled: true

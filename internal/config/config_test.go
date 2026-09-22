@@ -38,6 +38,44 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	}
 }
 
+func TestLoadNotificationPreferences(t *testing.T) {
+	for _, tt := range []struct {
+		name, yaml string
+		want       NotificationConfig
+	}{
+		{"omitted", "{}", NotificationConfig{Weekly: true, Monthly: true, SessionBelowPercent: 20}},
+		{"partial", "notifications:\n  weekly: false\n", NotificationConfig{Monthly: true, SessionBelowPercent: 20}},
+		{"disabled", "notifications:\n  weekly: false\n  monthly: false\n  sessionBelowPercent: 0\n", NotificationConfig{}},
+		{"custom threshold", "notifications:\n  sessionBelowPercent: 35.5\n", NotificationConfig{Weekly: true, Monthly: true, SessionBelowPercent: 35.5}},
+		{"maximum threshold", "notifications:\n  sessionBelowPercent: 100\n", NotificationConfig{Weekly: true, Monthly: true, SessionBelowPercent: 100}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Notifications != tt.want {
+				t.Fatalf("got %+v, want %+v", cfg.Notifications, tt.want)
+			}
+		})
+	}
+	for _, value := range []string{"-1", "101", ".nan", ".inf", "-.inf", "nope"} {
+		t.Run("invalid "+value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte("notifications:\n  sessionBelowPercent: "+value+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("accepted invalid threshold")
+			}
+		})
+	}
+}
+
 func TestNormalizeClientModesAndURL(t *testing.T) {
 	for _, mode := range []ClientMode{ClientModePreferDaemon, ClientModeRequireDaemon, ClientModeLocalOnly} {
 		t.Run(string(mode), func(t *testing.T) {

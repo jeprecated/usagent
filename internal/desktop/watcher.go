@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jeprecated/usagent/internal/config"
 	"github.com/jeprecated/usagent/internal/resetevents"
 )
 
@@ -34,6 +35,7 @@ type Notifier interface {
 }
 
 type Watcher struct {
+	Policy    config.NotificationConfig
 	Cursor    Cursor
 	Fetch     func(context.Context, Cursor) (resetevents.Page, error)
 	Save      func(Cursor) error
@@ -120,7 +122,7 @@ func (w *Watcher) present(ctx context.Context, page resetevents.Page) error {
 	}
 	var alerts []resetevents.Event
 	for _, event := range page.Events {
-		if shouldNotify(event) {
+		if w.shouldNotify(event) {
 			alerts = append(alerts, event)
 		}
 	}
@@ -178,7 +180,7 @@ func (w *Watcher) handle(ctx context.Context, sig Signal) error {
 }
 
 // Older stored events have only a display window label, not a window kind.
-func shouldNotify(event resetevents.Event) bool {
+func (w *Watcher) shouldNotify(event resetevents.Event) bool {
 	kind := event.WindowKind
 	window := strings.ToLower(strings.TrimSpace(event.Window))
 	if kind == "" {
@@ -197,10 +199,13 @@ func shouldNotify(event resetevents.Event) bool {
 			}
 		}
 	}
-	if kind == "weekly" || kind == "monthly" {
-		return true
+	switch kind {
+	case "weekly":
+		return w.Policy.Weekly
+	case "monthly":
+		return w.Policy.Monthly
 	}
-	return (window == "s" || window == "5h") && event.BeforePercent < 20
+	return (window == "s" || window == "5h") && event.BeforePercent < w.Policy.SessionBelowPercent
 }
 
 func formatNotification(events []resetevents.Event, action string) Notification {

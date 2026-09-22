@@ -79,7 +79,11 @@ in
         quota.refreshMs = 300000;
       };
       description = ''
-        YAML configuration rendered for usagent. Do not put plaintext tokens here:
+        YAML configuration rendered for usagent. Desktop alert preferences are
+        configured here via notifications.weekly (default true),
+        notifications.monthly (default true), and notifications.sessionBelowPercent
+        (default 20; range 0..100, with 0 disabling session alerts).
+        Do not put plaintext tokens here:
         Nix store-generated config is world-readable. Prefer runtime credential
         files, token env var names (for example OPENAI_ADMIN_KEY/ZAI_API_KEY),
         or an EnvironmentFile outside the Nix store for secrets.

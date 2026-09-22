@@ -6,10 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jeprecated/usagent/internal/config"
 	"github.com/jeprecated/usagent/internal/resetevents"
 )
 
 func TestNotificationPolicy(t *testing.T) {
+	w, _, _ := watcher()
 	for _, tt := range []struct {
 		name, kind, window, provider string
 		before                       float64
@@ -34,8 +36,47 @@ func TestNotificationPolicy(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := resetevents.Event{WindowKind: tt.kind, Window: tt.window, Provider: tt.provider, BeforePercent: tt.before, AfterPercent: 100}
-			if got := shouldNotify(e); got != tt.want {
+			if got := w.shouldNotify(e); got != tt.want {
 				t.Fatalf("shouldNotify(%+v) = %v", e, got)
+			}
+		})
+	}
+}
+
+func TestConfiguredNotificationPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name                     string
+		policy                   config.NotificationConfig
+		weekly, monthly, session bool
+	}{
+		{"disabled", config.NotificationConfig{}, false, false, false},
+		{"weekly only", config.NotificationConfig{Weekly: true}, true, false, false},
+		{"monthly only", config.NotificationConfig{Monthly: true}, false, true, false},
+		{"higher session threshold", config.NotificationConfig{SessionBelowPercent: 70}, false, false, true},
+		{"strict threshold", config.NotificationConfig{SessionBelowPercent: 64}, false, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w, f, saved := watcher()
+			w.Policy = tt.policy
+			p := resetevents.Page{StreamID: "stream", Events: []resetevents.Event{
+				{ID: 1, WindowKind: "weekly", Label: "Weekly"},
+				{ID: 2, WindowKind: "monthly", Label: "Monthly"},
+				ignored(3),
+			}}
+			for i, want := range []bool{tt.weekly, tt.monthly, tt.session} {
+				if got := w.shouldNotify(p.Events[i]); got != want {
+					t.Fatalf("event %d: got %v, want %v", i, got, want)
+				}
+			}
+			if err := w.present(context.Background(), p); err != nil {
+				t.Fatal(err)
+			}
+			if !tt.weekly && !tt.monthly && !tt.session {
+				if len(f.calls) != 0 || w.Cursor.After != 3 {
+					t.Fatal("disabled alerts were not skipped")
+				}
+			} else if len(f.calls) != 1 || len(*saved) != 0 {
+				t.Fatal("configured alerts were not left unread")
 			}
 		})
 	}

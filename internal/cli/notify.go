@@ -112,7 +112,7 @@ func RunNotify(ctx context.Context, args []string, stderr io.Writer) error {
 	defer notifier.Disconnect()
 	client := daemonClient{origin: origin, timeout: opts.Timeout}
 	watcher := desktop.Watcher{
-		Cursor: cursor, Notifier: notifier, Log: stderr,
+		Cursor: cursor, Notifier: notifier, Log: stderr, Policy: cfg.Notifications,
 		Fetch: func(ctx context.Context, c desktop.Cursor) (resetevents.Page, error) {
 			var page resetevents.Page
 			err := client.get(ctx, "/v1/reset-events", url.Values{"stream": {c.StreamID}, "after": {strconv.FormatUint(c.After, 10)}}, &page)

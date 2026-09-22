@@ -154,9 +154,14 @@ to recover after deliberate daemon state replacement. There is no server-side
 acknowledgement mutation or shared cross-desktop read state.
 
 `usagent notify` runs in the graphical user session, reads only the selected
-daemon (never provider APIs or fallback daemons), and filters for weekly/monthly
-replenishments plus 5-hour/session replenishments whose pre-reset remaining quota
-was strictly below 20%. Other windows are silent. Older events without a window
+daemon (never provider APIs or fallback daemons), and applies its local YAML
+`notifications` policy: `weekly` and `monthly` default to true;
+`sessionBelowPercent` defaults to 20, selecting 5-hour/session replenishments whose
+pre-reset remaining quota was strictly below that percentage. The threshold must
+be finite and between 0 and 100; 0 disables session alerts. Other windows are silent.
+The Home Manager module exposes these settings through
+`services.usagent.config.notifications`. Restart the notifier to apply changes;
+previously skipped events are not replayed when preferences change. Older events without a window
 kind use known window labels (including Claude's Fable and monthly extra quota).
 The daemon log remains unfiltered.
 

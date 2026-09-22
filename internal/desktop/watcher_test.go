@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jeprecated/usagent/internal/config"
 	"github.com/jeprecated/usagent/internal/resetevents"
 )
 
@@ -38,7 +39,7 @@ func events(ids ...uint64) resetevents.Page {
 func watcher() (*Watcher, *fakeNotifier, *[]Cursor) {
 	f := &fakeNotifier{signals: make(chan Signal, 4)}
 	saved := &[]Cursor{}
-	w := &Watcher{Cursor: Cursor{Origin: "http://daemon"}, Notifier: f,
+	w := &Watcher{Cursor: Cursor{Origin: "http://daemon"}, Notifier: f, Policy: config.Default().Notifications,
 		Fetch: func(context.Context, Cursor) (resetevents.Page, error) { return events(), nil },
 		Save:  func(c Cursor) error { *saved = append(*saved, c); return nil }}
 	return w, f, saved

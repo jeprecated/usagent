@@ -171,8 +171,10 @@ Usage:
 
 Reads saved reset events from the selected daemon only (no provider polling or
 local/alternate-daemon fallback). Missed alerts are grouped after login.
-Alerts: weekly/monthly replenishments, plus 5-hour/session replenishments only
-when the last observed remaining quota was below 20%. Other events are skipped.
+Default alerts: weekly/monthly replenishments, plus 5-hour/session replenishments
+only when the last observed remaining quota was below 20%. Configure YAML
+notifications.weekly, notifications.monthly, and notifications.sessionBelowPercent
+(0..100; 0 disables session alerts). Other events are skipped.
 Click Mark read to acknowledge; delivery, timeout, and closing a popup do not
 mark alerts read. Unread popups return on the next poll or login.
 Requires a Linux desktop notification service with action support.
