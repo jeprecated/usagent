@@ -58,8 +58,14 @@ func TestDesktopDBusProtocol(t *testing.T) {
 		t.Fatalf("Notify: %d %v", id, err)
 	}
 	got := <-obj.received
-	if got.app != "usagent" || got.replace != 12 || got.expiry != 0 || got.hints["transient"].Value() != false || len(got.actions) != 2 || got.actions[0] != "read:stream:7" {
+	if got.app != "usagent" || got.replace != 0 || got.expiry != 0 || got.hints["transient"].Value() != false || len(got.actions) != 2 || got.actions[0] != "read:stream:7" {
 		t.Fatalf("bad wire payload: %+v", got)
+	}
+	if _, err := d.Show(ctx, id, Notification{Action: "read:stream:7"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-obj.received; got.replace != id {
+		t.Fatal("same-owner notification was not replaced")
 	}
 	if err := server.Emit(notificationPath, notificationService+".ActionInvoked", id, "read:stream:7"); err != nil {
 		t.Fatal(err)
@@ -93,5 +99,24 @@ func TestDesktopDBusProtocol(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("no restart signal")
+	}
+	newServer, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newServer.Close()
+	if err := newServer.Export(obj, notificationPath, notificationService); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newServer.RequestName(notificationService, dbus.NameFlagDoNotQueue); err != nil {
+		t.Fatal(err)
+	}
+	// The watcher has not consumed the new-owner signal yet. A stale replacement
+	// ID must still never be sent to the new server.
+	if _, err := d.Show(ctx, id, Notification{Action: "read:stream:7"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-obj.received; got.replace != 0 {
+		t.Fatal("replaced another owner's notification")
 	}
 }

@@ -15,6 +15,7 @@ const notificationPath = dbus.ObjectPath("/org/freedesktop/Notifications")
 type Desktop struct {
 	conn    *dbus.Conn
 	signals chan Signal
+	owner   string // owner of the last delivered notification; accessed by the watcher only
 }
 
 func Connect() (*Desktop, error) {
@@ -94,6 +95,16 @@ func (d *Desktop) Show(ctx context.Context, replace uint32, n Notification) (uin
 	if !slices.Contains(capabilities, "actions") {
 		return 0, fmt.Errorf("desktop notifications must support actions (Mark read)")
 	}
+	// Address the unique owner, not the service name: a shell restart between
+	// calls must not replace or close an unrelated notification with a recycled ID.
+	var owner string
+	if err := d.conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, notificationService).Store(&owner); err != nil {
+		return 0, err
+	}
+	object = d.conn.Object(owner, notificationPath)
+	if owner != d.owner {
+		replace = 0
+	}
 	hints := map[string]dbus.Variant{
 		"urgency":   dbus.MakeVariant(byte(1)),
 		"resident":  dbus.MakeVariant(true),
@@ -107,11 +118,17 @@ func (d *Desktop) Show(ctx context.Context, replace uint32, n Notification) (uin
 	if err == nil && id == 0 {
 		err = fmt.Errorf("desktop returned an invalid notification ID")
 	}
+	if err == nil {
+		d.owner = owner
+	}
 	return id, err
 }
 
 func (d *Desktop) Close(ctx context.Context, id uint32) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	_ = d.conn.Object(notificationService, notificationPath).CallWithContext(ctx, notificationService+".CloseNotification", 0, id).Err
+	if d.owner == "" {
+		return
+	}
+	_ = d.conn.Object(d.owner, notificationPath).CallWithContext(ctx, notificationService+".CloseNotification", 0, id).Err
 }
