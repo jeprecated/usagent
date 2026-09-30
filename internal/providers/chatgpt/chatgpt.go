@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,6 +83,7 @@ type usagePayload struct {
 		SecondaryWindow *usageWindow `json:"secondary_window"`
 	} `json:"rate_limit"`
 	AdditionalRateLimits []additionalLimit `json:"additional_rate_limits"`
+	SpendingCredits      json.RawMessage   `json:"credits"`
 	ResetCredits         *struct {
 		AvailableCount int `json:"available_count"`
 	} `json:"rate_limit_reset_credits"`
@@ -361,6 +363,9 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 			items = append(items, windowItem(baseID+"-secondary", name, *secondary, now, refreshMs, staleMs))
 		}
 	}
+	if item, ok := spendingCreditsItem(payload.SpendingCredits, now, refreshMs, staleMs); ok {
+		items = append(items, item)
+	}
 	if payload.ResetCredits != nil {
 		items = append(items, resetCreditsItem(payload.ResetCredits.AvailableCount, now, refreshMs, staleMs))
 	}
@@ -384,6 +389,27 @@ func windowItem(id, label string, w usageWindow, now time.Time, refreshMs, stale
 		item.Reset = &model.Reset{ResetAt: resetAt, ResetWindowID: windowID, Source: "provider"}
 	}
 	return item
+}
+
+// Decode optional credit data separately so malformed balances cannot discard
+// subscription quotas. OpenAI normally sends balance as a string; numbers also
+// occur in usage integrations. Missing/unlimited balances are not zero balances.
+func spendingCreditsItem(raw json.RawMessage, now time.Time, refreshMs, staleMs int64) (model.QuotaItem, bool) {
+	var credits struct {
+		Unlimited bool        `json:"unlimited"`
+		Balance   json.Number `json:"balance"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &credits) != nil || credits.Unlimited {
+		return model.QuotaItem{}, false
+	}
+	balance, err := strconv.ParseFloat(string(credits.Balance), 64)
+	if err != nil || math.IsNaN(balance) || math.IsInf(balance, 0) || balance < 0 {
+		return model.QuotaItem{}, false
+	}
+	nowMs := now.UnixMilli()
+	// No initial grant, cumulative spend, or expiry is provided. Leave limit,
+	// used, percentUsed, and reset unset rather than fabricating a quota window.
+	return model.QuotaItem{ID: "chatgpt-spending-credits", Provider: "chatgpt", Label: "ChatGPT spending credits", Window: model.Window{ID: "spendingCredits", Label: "Credits", Kind: "credit"}, Unit: "credits", Remaining: balance, State: "fresh", Severity: "ok", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs}}, true
 }
 
 func resetCreditsItem(count int, now time.Time, refreshMs, staleMs int64) model.QuotaItem {

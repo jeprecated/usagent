@@ -36,6 +36,7 @@ func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {
 				"secondary_window":{"used_percent":60,"limit_window_seconds":604800,"reset_after_seconds":86400}
 			},
 			"additional_rate_limits":[{"display_name":"GPT-5.3-Codex-Spark","primary_window":{"used_percent":10,"limit_window_seconds":18000,"reset_after_seconds":100},"secondary_window":{"used_percent":20,"limit_window_seconds":604800,"reset_after_seconds":200}}],
+			"credits":{"has_credits":true,"unlimited":false,"balance":"62500"},
 			"rate_limit_reset_credits":{"available_count":2}
 		}`)
 	}))
@@ -47,14 +48,14 @@ func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {
 	if auth == "" || !strings.HasPrefix(auth, "Bearer ") || accountID != "acct-jwt" || userAgent != "usagent-test" {
 		t.Fatalf("headers auth=%q account=%q ua=%q", auth, accountID, userAgent)
 	}
-	if len(res.Items) != 5 {
+	if len(res.Items) != 6 {
 		t.Fatalf("items=%+v", res.Items)
 	}
 	byID := map[string]int{}
 	for i, item := range res.Items {
 		byID[item.ID] = i
 	}
-	for _, id := range []string{"chatgpt-primary", "chatgpt-secondary", "chatgpt-gpt-5-3-codex-spark-primary", "chatgpt-gpt-5-3-codex-spark-secondary", "chatgpt-rate-limit-reset-credits"} {
+	for _, id := range []string{"chatgpt-primary", "chatgpt-secondary", "chatgpt-gpt-5-3-codex-spark-primary", "chatgpt-gpt-5-3-codex-spark-secondary", "chatgpt-spending-credits", "chatgpt-rate-limit-reset-credits"} {
 		if _, ok := byID[id]; !ok {
 			t.Fatalf("missing %s in %+v", id, res.Items)
 		}
@@ -66,6 +67,10 @@ func TestChatGPTFetchNormalizesWHAMUsage(t *testing.T) {
 	weekly := res.Items[byID["chatgpt-secondary"]]
 	if weekly.Window.ID != "weekly" || weekly.Remaining != 40 {
 		t.Fatalf("weekly=%+v", weekly)
+	}
+	spending := res.Items[byID["chatgpt-spending-credits"]]
+	if spending.Remaining != 62500 || spending.Limit != 0 || spending.Used != 0 || spending.PercentUsed != 0 || spending.Unit != "credits" || spending.Window.Kind != "credit" || spending.Reset != nil || spending.Window.ResetAt != nil {
+		t.Fatalf("spending=%+v", spending)
 	}
 	credits := res.Items[byID["chatgpt-rate-limit-reset-credits"]]
 	if credits.Unit != "credits" || credits.Remaining != 2 || credits.Window.ID != "resetCredits" {

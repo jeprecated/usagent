@@ -187,7 +187,7 @@ func recommendationCandidate(provider model.Provider, items []model.QuotaItem, b
 	providerMatchesMetadata := recommendationMetadataMatches(provider, model.QuotaItem{}, opts)
 	filtered := make([]model.QuotaItem, 0, len(items))
 	for _, item := range items {
-		if !item.Visible || isResetCreditBankItem(item) {
+		if !item.Visible || isResetCreditBankItem(item) || isCreditBalanceItem(item) {
 			continue
 		}
 		if hasRecommendationMetadataFilters(opts) && !recommendationMetadataMatches(provider, item, opts) {

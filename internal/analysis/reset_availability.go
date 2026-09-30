@@ -100,10 +100,14 @@ func ProviderAvailabilitySummary(usage model.Usage, opts UsageAnalysisOptions) A
 	if now.IsZero() {
 		now = time.Now()
 	}
-	analysis := AnalyzeUsage(usage, UsageAnalysisOptions{Now: now})
 	itemsByProvider := map[string][]UsageAnalysisItem{}
-	for _, item := range analysis.Items {
-		itemsByProvider[item.Provider] = append(itemsByProvider[item.Provider], item)
+	for _, item := range usage.QuotaItems {
+		// An optional spending balance neither blocks included usage when empty
+		// nor proves an exhausted subscription usable when funded.
+		if isCreditBalanceItem(item) {
+			continue
+		}
+		itemsByProvider[item.Provider] = append(itemsByProvider[item.Provider], analyzeItem(item, now))
 	}
 	out := AvailabilityResponse{GeneratedAt: now.UnixMilli(), Providers: make([]ProviderAvailability, 0, len(usage.Providers))}
 	for _, provider := range usage.Providers {

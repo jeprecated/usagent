@@ -596,6 +596,10 @@ func resetAtMs(item model.QuotaItem) (int64, bool) {
 }
 
 func percentRemaining(item model.QuotaItem) float64 {
+	// A credit balance without a known budget cannot imply 100% headroom.
+	if isCreditBalanceItem(item) {
+		return 0
+	}
 	if item.Limit > 0 {
 		return clamp(item.Remaining/item.Limit*100, 0, 100)
 	}
@@ -647,6 +651,11 @@ func normalizedConfidence(value, fallback string) string {
 	default:
 		return fallback
 	}
+}
+
+// Balance-only credits are optional spending capacity, not subscription limits.
+func isCreditBalanceItem(item model.QuotaItem) bool {
+	return item.Window.Kind == "credit" && item.Limit == 0
 }
 
 func isResetCreditBankItem(item model.QuotaItem) bool {
