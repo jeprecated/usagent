@@ -18,7 +18,7 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	if cfg.Client.Mode != ClientModePreferDaemon || cfg.Client.URL != "" {
 		t.Fatalf("client=%+v", cfg.Client)
 	}
-	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent == "" || cfg.Providers.ClaudeOAuth.AccountPath == "" || cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL == "" || cfg.Providers.ClaudeOAuth.AllowResetConsume {
+	if cfg.Providers.ClaudeOAuth.EndpointURL == "" || cfg.Providers.ClaudeOAuth.UserAgent != DefaultClaudeOAuthUserAgent || cfg.Providers.ClaudeOAuth.AccountPath == "" || cfg.Providers.ClaudeOAuth.ResetConsumeEndpointURL == "" || cfg.Providers.ClaudeOAuth.AllowResetConsume {
 		t.Fatalf("claude=%+v", cfg.Providers.ClaudeOAuth)
 	}
 	if got := cfg.UsageView.Providers; len(got) != 4 || got[0] != "claude-code" || got[1] != "chatgpt" || got[3] != "cursor" {
@@ -35,6 +35,24 @@ func TestLoadParsesExampleYAML(t *testing.T) {
 	}
 	if cfg.Providers.Cursor.AuthPath == "" || cfg.Providers.Cursor.EndpointURL == "" || cfg.Providers.Cursor.BalanceEndpointURL == "" || cfg.Providers.Cursor.TokenEnv != "CURSOR_ACCESS_TOKEN" {
 		t.Fatalf("cursor=%+v", cfg.Providers.Cursor)
+	}
+}
+
+func TestClaudeOAuthUserAgentDefaultsAndOverride(t *testing.T) {
+	for _, tt := range []struct {
+		name, override, want string
+	}{
+		{"default", "", DefaultClaudeOAuthUserAgent},
+		{"explicit", "custom-client/test", "custom-client/test"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{}
+			cfg.Providers.ClaudeOAuth.UserAgent = tt.override
+			cfg = normalizeProviderDefaults(cfg)
+			if got := cfg.Providers.ClaudeOAuth.UserAgent; got != tt.want {
+				t.Fatalf("userAgent=%q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

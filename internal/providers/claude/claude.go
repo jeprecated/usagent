@@ -42,6 +42,9 @@ func NewWithClient(cfg config.ClaudeOAuthConfig, c *http.Client) *Provider {
 	if c == nil {
 		c = http.DefaultClient
 	}
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = config.DefaultClaudeOAuthUserAgent
+	}
 	return &Provider{cfg: cfg, client: c, tokenURL: tokenEndpoint}
 }
 func (p *Provider) ID() string    { return "claude-code" }
@@ -252,6 +255,9 @@ func (p *Provider) ListResetCredits(ctx context.Context, now time.Time) (model.C
 	payload, _, err := p.loadUsage(ctx, now)
 	if err != nil {
 		return model.ClaudeResetCreditsResponse{}, err
+	}
+	if resetSurfaceRejected(payload.CedarEmber) {
+		return model.ClaudeResetCreditsResponse{}, errors.New("claude reset credits unavailable: API rejected client surface; check providers.claudeOAuth.userAgent")
 	}
 	return normalizeResetCredits(payload.CedarEmber, now), nil
 }
@@ -652,7 +658,7 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 			items = append(items, item)
 		}
 	}
-	if payload.CedarEmber != nil {
+	if payload.CedarEmber != nil && !resetSurfaceRejected(payload.CedarEmber) {
 		items = append(items, resetCreditsItem(availableResetCount(payload.CedarEmber), now, refreshMs, staleMs))
 	}
 	return items
@@ -815,6 +821,11 @@ func normalizeResetCredits(block *cedarEmber, now time.Time) model.ClaudeResetCr
 		res.Credits = append(res.Credits, credit)
 	}
 	return res
+}
+
+// A surface rejection with empty grants is not evidence of a zero balance.
+func resetSurfaceRejected(block *cedarEmber) bool {
+	return block != nil && block.IneligibleReason == "surface"
 }
 
 func availableResetCount(block *cedarEmber) int {

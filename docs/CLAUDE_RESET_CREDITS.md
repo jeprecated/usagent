@@ -41,6 +41,7 @@ providers:
     credentialsPath: "~/.claude/.credentials.json"
     accountPath: "~/.claude.json"
     endpointUrl: "https://api.anthropic.com/api/oauth/usage"
+    userAgent: "claude-cli/2.1.287 (external, cli)"
     profileEndpointUrl: "https://api.anthropic.com/api/oauth/profile"
     resetConsumeEndpointUrl: "https://api.anthropic.com/api/organizations/{organizationUuid}/reset_rate_limits"
     allowResetConsume: false
@@ -63,7 +64,9 @@ providers:
 }
 ```
 
-The item is omitted when `cedar_ember` is absent. Missing blocks are not fabricated.
+The item is omitted when `cedar_ember` is absent or reports `ineligible_reason: "surface"`. Missing or surface-rejected blocks are not treated as zero balances. The detailed reset-credit endpoint returns an error for a surface rejection.
+
+Anthropic gates reset visibility on the request's User-Agent. The default uses the Claude Code CLI format (`claude-cli/... (external, cli)`); the old `claude-code/2.0` value yields a surface rejection even when a reset is banked. If your configuration explicitly sets that old value, remove the override or update it to the value above.
 
 ## Listing banked credits
 

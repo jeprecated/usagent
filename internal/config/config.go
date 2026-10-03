@@ -16,6 +16,9 @@ import (
 
 const DefaultStateBase = "~/.local/state"
 
+// Anthropic gates banked-reset visibility on the Claude Code CLI surface.
+const DefaultClaudeOAuthUserAgent = "claude-cli/2.1.287 (external, cli)"
+
 const (
 	MinClaudeOAuthRefreshMs = int64((15 * time.Minute) / time.Millisecond)
 	MinChatGPTRefreshMs     = int64((5 * time.Minute) / time.Millisecond)
@@ -414,7 +417,7 @@ func normalizeProviderDefaults(cfg Config) Config {
 		cfg.Providers.ClaudeOAuth.BetaHeader = "oauth-2025-04-20"
 	}
 	if cfg.Providers.ClaudeOAuth.UserAgent == "" {
-		cfg.Providers.ClaudeOAuth.UserAgent = "claude-code/2.0"
+		cfg.Providers.ClaudeOAuth.UserAgent = DefaultClaudeOAuthUserAgent
 	}
 	if cfg.Providers.ClaudeOAuth.RefreshMs <= 0 {
 		cfg.Providers.ClaudeOAuth.RefreshMs = cfg.Quota.RefreshMs
