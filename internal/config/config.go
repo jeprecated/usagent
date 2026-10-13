@@ -74,6 +74,7 @@ type ProvidersConfig struct {
 	Anthropic   AnthropicConfig        `yaml:"anthropic"`
 	ZAI         ZAIConfig              `yaml:"zAi"`
 	Cursor      CursorConfig           `yaml:"cursor"`
+	CLIProxy    CLIProxyConfig         `yaml:"cliproxy"`
 	Custom      []CustomProviderConfig `yaml:"custom"`
 }
 
@@ -371,6 +372,10 @@ func Normalize(cfg Config) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+	cfg.Providers.CLIProxy, err = normalizeCLIProxy(cfg.Providers.CLIProxy, cfg.Quota.RefreshMs)
+	if err != nil {
+		return cfg, err
+	}
 	if cfg.Server.StatePath == "" {
 		cfg.Server.StatePath = "%STATE%/usagent/snapshot.json"
 	}
@@ -605,6 +610,7 @@ func normalizeMetadata(cfg Config) Config {
 	cfg.Providers.Anthropic.Metadata = normalizeProviderMetadata(cfg.Providers.Anthropic.Metadata)
 	cfg.Providers.ZAI.Metadata = normalizeProviderMetadata(cfg.Providers.ZAI.Metadata)
 	cfg.Providers.Cursor.Metadata = normalizeProviderMetadata(cfg.Providers.Cursor.Metadata)
+	cfg.Providers.CLIProxy.Metadata = normalizeProviderMetadata(cfg.Providers.CLIProxy.Metadata)
 	for i := range cfg.Providers.Custom {
 		cfg.Providers.Custom[i].Metadata = normalizeProviderMetadata(cfg.Providers.Custom[i].Metadata)
 	}

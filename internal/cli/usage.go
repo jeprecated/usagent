@@ -298,11 +298,12 @@ func FormatUsageWithColor(usage model.Usage, color bool) string {
 			if status == "fresh" {
 				status = ""
 			}
-			if status != "" {
+			if status != "" && status != "error" {
 				if age := staleAge(item, usage.GeneratedAt); age != "" {
 					status += " " + age
 				}
-			} else if i == 0 && providerState != "fresh" {
+			} else if status == "" && i == 0 && providerState != "fresh" && (provider.Error != nil || providerState != "error") {
+				// An error without a provider error belongs to its own item row.
 				status = providerState
 			}
 			itemError := item.Error
@@ -465,6 +466,9 @@ func staleAge(item model.QuotaItem, now int64) string {
 }
 
 func formatRemaining(item model.QuotaItem) string {
+	if item.State == "error" && item.Limit == 0 && item.Remaining == 0 {
+		return "-"
+	}
 	remaining := item.Remaining
 	switch strings.ToLower(item.Unit) {
 	case "percent", "%":

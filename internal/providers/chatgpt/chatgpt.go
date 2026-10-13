@@ -325,6 +325,15 @@ func credentials(cfg config.ChatGPTConfig) (token, accountID string, err error) 
 	return fileToken, firstNonEmpty(accountID, fileAccountID), nil
 }
 
+// NormalizeJSON parses a wham usage response fetched by another client.
+func NormalizeJSON(body []byte, now time.Time, refreshMs, staleMs int64) ([]model.QuotaItem, error) {
+	var payload usagePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return Normalize(payload, now, refreshMs, staleMs), nil
+}
+
 func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []model.QuotaItem {
 	if refreshMs <= 0 {
 		refreshMs = int64((5 * time.Minute) / time.Millisecond)

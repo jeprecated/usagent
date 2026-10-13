@@ -17,6 +17,7 @@ import (
 	"github.com/jeprecated/usagent/internal/providers/anthropic"
 	"github.com/jeprecated/usagent/internal/providers/chatgpt"
 	"github.com/jeprecated/usagent/internal/providers/claude"
+	"github.com/jeprecated/usagent/internal/providers/cliproxy"
 	"github.com/jeprecated/usagent/internal/providers/cursor"
 	"github.com/jeprecated/usagent/internal/providers/custom"
 	"github.com/jeprecated/usagent/internal/providers/noop"
@@ -91,6 +92,15 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.Cursor.RefreshMs, StaleMs: cfg.Providers.Cursor.StaleMs}
 		active[p.ID()] = true
 	}
+	if cfg.Providers.CLIProxy.Enabled {
+		p := cliproxy.New(cfg.Providers.CLIProxy)
+		ps = append(ps, p)
+		timings[p.ID()] = ProviderTiming{RefreshMs: cfg.Providers.CLIProxy.RefreshMs, StaleMs: cfg.Providers.CLIProxy.StaleMs}
+		active[p.ID()] = true
+		if !contains(cfg.UsageView.Providers, p.ID()) {
+			cfg.UsageView.Providers = append(cfg.UsageView.Providers, p.ID())
+		}
+	}
 	for _, cp := range cfg.Providers.Custom {
 		if !cp.Enabled {
 			continue
@@ -132,13 +142,15 @@ func LabelFor(id string) string {
 		return "z.ai"
 	case "cursor":
 		return "Cursor"
+	case "cliproxy":
+		return "CLIProxy"
 	default:
 		return id
 	}
 }
 
 func labelsFor(cfg config.Config) map[string]string {
-	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "anthropic": "Anthropic API", "z-ai": "z.ai", "cursor": "Cursor"}
+	labels := map[string]string{"claude-code": "Claude", "chatgpt": "ChatGPT Pro", "openai": "OpenAI API", "anthropic": "Anthropic API", "z-ai": "z.ai", "cursor": "Cursor", "cliproxy": "CLIProxy"}
 	for _, cp := range cfg.Providers.Custom {
 		if cp.Label != "" {
 			labels[cp.ID] = cp.Label
@@ -226,6 +238,8 @@ func providerMetadataFor(cfg config.Config, id string) config.ProviderMetadataCo
 		return cfg.Providers.ZAI.Metadata
 	case "cursor":
 		return cfg.Providers.Cursor.Metadata
+	case "cliproxy":
+		return cfg.Providers.CLIProxy.Metadata
 	default:
 		for _, cp := range cfg.Providers.Custom {
 			if cp.ID == id {

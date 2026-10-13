@@ -636,6 +636,18 @@ func writeCredentials(path string, b []byte) error {
 	return nil
 }
 
+// UsageURL adds the banked-reset query to an OAuth usage endpoint.
+func UsageURL(raw string) string { return usageURL(raw) }
+
+// NormalizeJSON parses an OAuth usage response fetched by another client.
+func NormalizeJSON(body []byte, now time.Time, refreshMs, staleMs int64) ([]model.QuotaItem, error) {
+	var payload usagePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return Normalize(payload, now, refreshMs, staleMs), nil
+}
+
 func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []model.QuotaItem {
 	if refreshMs <= 0 {
 		refreshMs = int64((5 * time.Minute) / time.Millisecond)

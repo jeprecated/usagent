@@ -32,6 +32,18 @@ func TestFormatUsagePrintsRemainingByConfiguredProvider(t *testing.T) {
 	}
 }
 
+func TestFormatUsageShowsAccountErrorOnItsOwnRow(t *testing.T) {
+	usage := model.Usage{GeneratedAt: 1_000_000, Providers: []model.Provider{{ID: "cliproxy", Label: "CLIProxy", State: model.ProviderStateError}}, QuotaItems: []model.QuotaItem{
+		{ID: "a-session", Provider: "cliproxy", Label: "Claude a***@x.com 5h", Window: model.Window{ID: "session", Label: "S"}, Unit: "percent", Limit: 100, Remaining: 40, State: "fresh", Visible: true},
+		{ID: "b-status", Provider: "cliproxy", Label: "Devin b***@x.com", Window: model.Window{ID: "status", Label: "-"}, State: "error", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: 1_000_000}, Error: &model.ItemError{Message: "devin user status returned HTTP 401"}},
+	}}
+	got := FormatUsage(usage)
+	want := "Usage\nremaining quota by provider\n\nPROVIDER  QUOTA                 WINDOW  REMAINING  STATUS\nCLIProxy  Claude a***@x.com 5h  S             40%\n          Devin b***@x.com      -               -  error · authentication required; sign in again\n"
+	if got != want {
+		t.Fatalf("FormatUsage()=\n%s\nwant=\n%s", got, want)
+	}
+}
+
 func TestFormatUsageIncludesUnavailableProviderError(t *testing.T) {
 	usage := model.Usage{Providers: []model.Provider{{ID: "openai", Label: "OpenAI", State: model.ProviderStateError, Error: &model.ItemError{Message: "openai costs returned HTTP 500"}}}}
 	got := FormatUsage(usage)

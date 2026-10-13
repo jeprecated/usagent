@@ -268,6 +268,31 @@ providers:
 
 Anthropic Console/API prepaid credits are separate from Claude subscription extra usage. Enable `providers.anthropic` only for a real Anthropic organization account with Admin API access; personal/individual Console organizations are not supported. It uses a configurable balance/cost checkpoint and a runtime `ANTHROPIC_ADMIN_KEY` (or `apiKeyFile`) to show spending since the checkpoint and **estimated remaining USD**, automatically adding itself to the usage view. No balance is assumed or hard-coded. See [`docs/ANTHROPIC_CREDITS.md`](docs/ANTHROPIC_CREDITS.md) for key setup, capturing the daily-UTC spending baseline without double-counting, and reconciling purchases or credit adjustments.
 
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) accounts are read with `providers.cliproxy.enabled=true`. usagent lists every enrolled credential through `GET /v8/management/credentials`. It then fetches each account's usage endpoint through `POST /v8/management/requests/api-call`, so CLIProxyAPI attaches and refreshes the account's own token. usagent never stores or refreshes those OAuth tokens. Supported account types:
+
+- Claude: 5h, weekly, Fable weekly, extra credits, banked resets
+- Codex: 5h, weekly, per-model limits, spending credits, banked resets
+- Antigravity: quota buckets
+- Devin: daily and weekly
+- Kimi
+- Meta
+- Grok/xAI: subscription billing only
+
+Disabled credentials, API-key credentials and other provider types are skipped. A failing account appears as its own error row while the other accounts keep updating.
+
+Items belong to the single `cliproxy` provider, which adds itself to the usage view. Account names are masked (`j***@example.com`) because the daemon has no read authentication; set a credential note in CLIProxyAPI to show a chosen name instead. Reset redemption stays with the built-in `claudeOAuth`/`chatgpt` providers.
+
+The management key can read every CLIProxyAPI client key, so keep it in the runtime environment (`CLIPROXY_MANAGEMENT_KEY` by default) or a `managementKeyFile`. `baseUrl` must be HTTPS unless it is loopback. A rejected key backs off for an hour, because CLIProxyAPI bans clients after repeated failed logins.
+
+```yaml
+providers:
+  cliproxy:
+    enabled: true
+    baseUrl: "http://127.0.0.1:8317"
+    managementKeyEnv: "CLIPROXY_MANAGEMENT_KEY"
+    # managementKeyFile: "${XDG_RUNTIME_DIR}/agenix/cliproxyapi-management-key"
+```
+
 z.ai usage is fetched from `GET https://api.z.ai/api/monitor/usage/quota/limit` when `providers.zAi.enabled=true`. Provide `ZAI_API_KEY` (fallback `GLM_API_KEY`) or override auth/header settings for compatible endpoints:
 
 ```yaml

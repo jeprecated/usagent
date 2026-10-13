@@ -106,7 +106,8 @@ func (s *Store) UpsertSuccess(id, label string, items []model.QuotaItem, now tim
 		copied[i].State = stateOr(copied[i].State, "fresh")
 		copied[i].Severity = severityOr(copied[i].Severity, "ok")
 		copied[i].Refresh = &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: next, StaleAt: stale}
-		copied[i].Error = nil
+		// Keep item errors a provider reports for part of a successful refresh
+		// (for example one failing CLIProxy account).
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

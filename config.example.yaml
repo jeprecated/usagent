@@ -124,6 +124,18 @@ providers:
     refreshMs: 300000
     staleMs: 900000
 
+  cliproxy:
+    # Every account enrolled in CLIProxyAPI (Claude, Codex, Antigravity, Devin,
+    # Kimi, Meta, Grok), read through its management API. CLIProxyAPI attaches
+    # each account's token; usagent only needs the management login key.
+    enabled: false
+    baseUrl: "http://127.0.0.1:8317" # HTTPS required unless loopback
+    managementKeyEnv: "CLIPROXY_MANAGEMENT_KEY"
+    # Alternatively read a raw key file at refresh time (takes precedence over env):
+    # managementKeyFile: "~/.config/usagent/cliproxy-management-key"
+    refreshMs: 300000
+    staleMs: 900000
+
   custom:
     - id: "my-provider"
       label: "Mine"
