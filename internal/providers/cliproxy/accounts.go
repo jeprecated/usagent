@@ -54,6 +54,17 @@ func (p *Provider) fetchCodex(ctx context.Context, key string, a account, now ti
 	if err != nil {
 		return nil, errors.New("codex usage returned invalid JSON")
 	}
+	// Usage only counts banked resets; their expiry needs the credit listing.
+	// It is best effort so a failed listing never hides the account's quota.
+	for i := range items {
+		if items[i].Window.ID != "resetCredits" || items[i].Remaining <= 0 {
+			continue
+		}
+		listing, err := p.upstream(ctx, key, a, upstreamRequest{label: "codex reset credits", method: http.MethodGet, url: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", header: header})
+		if err == nil {
+			items[i].ExpiresAt, _ = chatgpt.ResetCreditsExpiry(listing, now)
+		}
+	}
 	return adopt(a, items, "chatgpt-", "ChatGPT"), nil
 }
 

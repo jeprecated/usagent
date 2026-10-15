@@ -280,7 +280,7 @@ Anthropic Console/API prepaid credits are separate from Claude subscription extr
 
 Disabled credentials, API-key credentials and other provider types are skipped. A failing account appears as its own error row while the other accounts keep updating.
 
-Items belong to the single `cliproxy` provider, which adds itself to the usage view. Account names are masked (`j***@example.com`) because the daemon has no read authentication; set a credential note in CLIProxyAPI to show a chosen name instead. Reset redemption stays with the built-in `claudeOAuth`/`chatgpt` providers.
+Items belong to the single `cliproxy` provider, which adds itself to the usage view. Account names are masked (`j***@example.com`) because the daemon has no read authentication; set a credential note in CLIProxyAPI to show a chosen name instead. Banked-reset items carry `expiresAt`, when the soonest reset expires; Codex accounts with banked resets need one extra credit-listing request for it. Reset redemption stays with the built-in `claudeOAuth`/`chatgpt` providers.
 
 The management key can read every CLIProxyAPI client key, so keep it in the runtime environment (`CLIPROXY_MANAGEMENT_KEY` by default) or a `managementKeyFile`. `baseUrl` must be HTTPS unless it is loopback. A rejected key backs off for an hour, because CLIProxyAPI bans clients after repeated failed logins.
 

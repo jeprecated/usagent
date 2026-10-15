@@ -671,7 +671,9 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 		}
 	}
 	if payload.CedarEmber != nil && !resetSurfaceRejected(payload.CedarEmber) {
-		items = append(items, resetCreditsItem(availableResetCount(payload.CedarEmber), now, refreshMs, staleMs))
+		item := resetCreditsItem(availableResetCount(payload.CedarEmber), now, refreshMs, staleMs)
+		item.ExpiresAt = earliestGrantExpiry(payload.CedarEmber, now)
+		items = append(items, item)
 	}
 	return items
 }
@@ -851,6 +853,21 @@ func availableResetCount(block *cedarEmber) int {
 		}
 	}
 	return count
+}
+
+// earliestGrantExpiry is when the next grant with resets left lapses.
+func earliestGrantExpiry(block *cedarEmber, now time.Time) *int64 {
+	var earliest *int64
+	for _, g := range block.Grants {
+		expires, ok := parseFlexibleTime(g.EndsAt)
+		if g.ResetsLeft <= 0 || !ok || !expires.After(now) {
+			continue
+		}
+		if ms := expires.UnixMilli(); earliest == nil || ms < *earliest {
+			earliest = &ms
+		}
+	}
+	return earliest
 }
 
 func grantStatus(g cedarGrant, now time.Time) string {

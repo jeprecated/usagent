@@ -60,9 +60,12 @@ providers:
   "label": "Claude resets",
   "window": { "id": "resetCredits", "label": "Resets", "kind": "credit" },
   "unit": "credits",
-  "remaining": 1
+  "remaining": 1,
+  "expiresAt": 1792684800000
 }
 ```
+
+`expiresAt` is when the soonest grant with resets left ends (`ends_at`), in Unix milliseconds. It is omitted when no such grant has a future end time.
 
 The item is omitted when `cedar_ember` is absent or reports `ineligible_reason: "surface"`. Missing or surface-rejected blocks are not treated as zero balances. The detailed reset-credit endpoint returns an error for a surface rejection.
 

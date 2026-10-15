@@ -3,6 +3,7 @@ package cliproxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,12 +59,18 @@ func (f *fakeProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.calls = append(f.calls, call)
 		f.mu.Unlock()
-		for prefix, respond := range f.upstream {
-			if strings.HasPrefix(call.URL, prefix) {
-				status, body := respond(call)
-				_ = json.NewEncoder(w).Encode(map[string]any{"status_code": status, "header": map[string][]string{}, "body": body})
-				return
+		// The longest matching prefix wins, so overlapping URLs resolve the same
+		// way on every run.
+		match := ""
+		for prefix := range f.upstream {
+			if strings.HasPrefix(call.URL, prefix) && len(prefix) > len(match) {
+				match = prefix
 			}
+		}
+		if match != "" {
+			status, body := f.upstream[match](call)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status_code": status, "header": map[string][]string{}, "body": body})
+			return
 		}
 		f.t.Errorf("unexpected upstream %s", call.URL)
 		_ = json.NewEncoder(w).Encode(map[string]any{"status_code": 599, "body": ""})
@@ -228,6 +235,62 @@ func TestFetchKeepsHealthyAccountsWhenOneFails(t *testing.T) {
 	}
 	if failed.Error.Message != "claude oauth usage returned HTTP 401" {
 		t.Fatalf("error message = %q", failed.Error.Message)
+	}
+}
+
+func TestFetchReportsWhenBankedResetsExpire(t *testing.T) {
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	soon := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC).UnixMilli()
+	proxy := &fakeProxy{t: t,
+		files: []map[string]any{
+			{"auth_index": "c1", "provider": "claude", "email": "a@example.com"},
+			{"auth_index": "x1", "provider": "codex", "email": "b@example.com"},
+			{"auth_index": "x2", "provider": "codex", "email": "c@example.com"},
+			{"auth_index": "x3", "provider": "codex", "email": "d@example.com"},
+		},
+		upstream: map[string]func(apiCall) (int, string){
+			"https://api.anthropic.com/": fixed(200, `{"limits":[{"kind":"session","percent":10}],"cedar_ember":{"eligible":true,"grants":[`+
+				`{"id":"later","resets_left":1,"ends_at":"2026-10-30T12:00:00Z"},`+
+				`{"id":"soon","resets_left":1,"ends_at":"2026-10-15T12:00:00Z"},`+
+				`{"id":"spent","resets_left":0,"ends_at":"2026-10-14T12:00:00Z"}]}}`),
+			"https://chatgpt.com/backend-api/wham/usage": func(call apiCall) (int, string) {
+				count := map[string]int{"x1": 2, "x2": 0, "x3": 1}[call.AuthIndex]
+				return 200, fmt.Sprintf(`{"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":%d}}`, count)
+			},
+			"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits": func(call apiCall) (int, string) {
+				if call.AuthIndex == "x3" {
+					return 500, ""
+				}
+				return 200, `{"available_count":2,"credits":[` +
+					`{"id":"r1","status":"available","expires_at":"2026-10-30T12:00:00Z"},` +
+					`{"id":"r2","status":"available","expires_at":"2026-10-15T12:00:00Z"},` +
+					`{"id":"r3","status":"redeemed","expires_at":"2026-10-14T12:00:00Z"}]}`
+			},
+		},
+	}
+	result, err := newProvider(t, proxy).Fetch(context.Background(), now)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	items := itemsByID(result.Items)
+	for _, id := range []string{"cliproxy-claude-c1-rate-limit-reset-credits", "cliproxy-codex-x1-rate-limit-reset-credits"} {
+		if expires := items[id].ExpiresAt; expires == nil || *expires != soon {
+			t.Errorf("%s expiresAt = %v; want %d", id, expires, soon)
+		}
+	}
+	// No banked resets means no listing; a failed listing keeps the count.
+	for _, id := range []string{"cliproxy-codex-x2-rate-limit-reset-credits", "cliproxy-codex-x3-rate-limit-reset-credits"} {
+		if item, ok := items[id]; !ok || item.ExpiresAt != nil {
+			t.Errorf("%s = %+v", id, item)
+		}
+	}
+	if items["cliproxy-codex-x3-rate-limit-reset-credits"].Remaining != 1 {
+		t.Errorf("failed listing dropped the reset count")
+	}
+	for _, call := range proxy.calls {
+		if call.AuthIndex == "x2" && strings.Contains(call.URL, "rate-limit-reset-credits") {
+			t.Errorf("listed credits for an account without banked resets")
+		}
 	}
 }
 

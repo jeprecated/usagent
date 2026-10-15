@@ -421,6 +421,26 @@ func spendingCreditsItem(raw json.RawMessage, now time.Time, refreshMs, staleMs 
 	return model.QuotaItem{ID: "chatgpt-spending-credits", Provider: "chatgpt", Label: "ChatGPT spending credits", Window: model.Window{ID: "spendingCredits", Label: "Credits", Kind: "credit"}, Unit: "credits", Remaining: balance, State: "fresh", Severity: "ok", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs}}, true
 }
 
+// ResetCreditsExpiry reads a rate-limit-reset-credits listing and returns when
+// the next available credit expires.
+func ResetCreditsExpiry(body []byte, now time.Time) (*int64, error) {
+	var payload resetCreditsPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	var earliest *int64
+	for _, c := range payload.Credits {
+		expires, err := time.Parse(time.RFC3339Nano, c.ExpiresAt)
+		if c.Status != "available" || err != nil || !expires.After(now) {
+			continue
+		}
+		if ms := expires.UnixMilli(); earliest == nil || ms < *earliest {
+			earliest = &ms
+		}
+	}
+	return earliest, nil
+}
+
 func resetCreditsItem(count int, now time.Time, refreshMs, staleMs int64) model.QuotaItem {
 	if count < 0 {
 		count = 0

@@ -76,6 +76,8 @@ This is just the available count from:
 rate_limit_reset_credits.available_count
 ```
 
+The usage response carries no expiry. For CLIProxyAPI Codex accounts with banked resets, the `cliproxy` provider also reads the credit listing below and sets `expiresAt` to when the soonest available credit expires, in Unix milliseconds. A failed listing leaves `expiresAt` unset and keeps the count.
+
 ## Listing banked credits
 
 Use the detail endpoint to see IDs, status, grant time, and expiry:

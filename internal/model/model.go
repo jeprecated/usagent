@@ -67,6 +67,7 @@ type QuotaItem struct {
 	ModelTags    []string   `json:"modelTags,omitempty"`
 	Refresh      *Refresh   `json:"refresh,omitempty"`
 	Reset        *Reset     `json:"reset,omitempty"`
+	ExpiresAt    *int64     `json:"expiresAt,omitempty"` // when the soonest-expiring banked credit lapses
 	Error        *ItemError `json:"error,omitempty"`
 }
 
