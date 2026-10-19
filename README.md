@@ -354,6 +354,7 @@ The flake exposes:
 
 - `packages.default` / `packages.usagent`
 - `packages.oci`
+- `packages.usagent-bar` (Darwin only; see [macOS menu bar app](#macos-menu-bar-app))
 - `apps.default` / `apps.usagent`
 - `nixosModules.usagent`
 - `homeManagerModules.usagent`
@@ -408,3 +409,55 @@ Usage: Claude S:100% W:50% F:24% [2h14m] · ChatGPT S:75% W:40% · z.ai S:90% W:
 ```
 
 ChatGPT, OpenAI API costs, Anthropic API credit estimates, z.ai, and configured custom providers are real pull providers when enabled; disabled providers can still appear as metadata-only entries via `usageView.providers`.
+
+## macOS menu bar app
+
+`macos/` is a SwiftPM package for UsageBar, a native menu bar app. It shows the same compact bar and detail popup as the Noctalia widget, read from a usagent daemon over HTTP:
+
+```text
+AI: C·c 86% 6d · C·j 56% F40% 4d S 12%! 21m · X·j1 80% 5d · X·j2 15%! 30h · CUR M 81% 19d
+```
+
+```sh
+nix build .#usagent-bar             # Darwin only: result/Applications/UsageBar.app
+cd macos
+swift test                          # needs Xcode's XCTest
+swift build
+.build/debug/UsageBar --dump        # fetch once, print the bar text and the popup, exit
+```
+
+- The menu bar item is coloured by account kind and severity. Clicking it opens the popover, which has Refresh and Quit buttons.
+- The app polls `usageUrl` every 10 s with a 5 s timeout. It fetches the expiring-usage and reset-credit endpoints at most every `auxFetchIntervalMs`, after a successful poll.
+- When a fetch fails, the bar keeps its last values and dims, and the popup shows the error.
+- It runs as an accessory app (`LSUIElement`), so it has no Dock icon. It exits non-zero only on a crash, so launchd can restart it with `KeepAlive.SuccessfulExit = false`. Quit exits 0.
+- `--dump` exits non-zero when the usage fetch fails.
+- The Nix build runs the checks through the `UsageCoreChecks` executable, because nixpkgs' SwiftPM cannot run XCTest on Darwin. `swift test` runs the same checks.
+
+Settings live in the `dev.jeprecated.usagent-bar` defaults domain. They use the Noctalia widget's setting names and defaults, except that `usageUrl` defaults to Lattice's daemon. The app reads them again on every poll.
+
+| Key | Type | Default |
+|---|---|---|
+| `usageUrl` | string | `http://lattice.tail6e682f.ts.net:8788/v1/usage` |
+| `providers` | string array | `claude-code chatgpt openai z-ai` |
+| `windows` | string array | `session weekly fableWeekly monthly resetCredits spendingCredits` |
+| `excludeWindows` | string array | `web` |
+| `showFableWeekly`, `hideUnavailable` | bool | `true` |
+| `sessionBarThreshold` | number | `30` |
+| `showExpiringUsage`, `expiringIncludeLowConfidence` | bool | `true` |
+| `expiringUsageUrl` | string | derived from `usageUrl` |
+| `expiringWithin` | string | `168h` |
+| `maxExpiringItems`, `maxResetCredits` | number | `4` (`0` means unlimited) |
+| `showChatGPTResetCredits` | bool | `true` |
+| `chatGPTResetCreditsUrl` | string | derived from `usageUrl` |
+| `auxFetchIntervalMs` | number | `300000` (at least `30000`) |
+| `popoverWidth`, `popoverMaxHeight` | number | `540`, `520` |
+| `colors` | dictionary of `#RRGGBB` / `#AARRGGBB` | the widget's palette |
+
+```sh
+defaults write dev.jeprecated.usagent-bar usageUrl -string http://lattice.tail6e682f.ts.net:8788/v1/usage
+defaults write dev.jeprecated.usagent-bar providers -array cliproxy cursor
+# One-off override without writing defaults:
+UsageBar --dump -providers '(cliproxy, cursor)'
+```
+
+The bundle's `Info.plist` allows plain HTTP to `ts.net` hosts, because the daemon is reached over the tailnet without TLS. Other plain-HTTP hosts are subject to App Transport Security.

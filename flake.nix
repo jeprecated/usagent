@@ -24,23 +24,28 @@
           };
         };
       in {
-        packages.default = usagent;
-        packages.usagent = usagent;
-        packages.oci = pkgs.dockerTools.buildLayeredImage {
-          name = "usagent";
-          tag = version;
-          contents = [ pkgs.cacert ];
-          config = {
-            User = "10001:10001";
-            ExposedPorts = { "8787/tcp" = {}; };
-            Env = [
-              "USAGENT_CONFIG=/etc/usagent/config.yaml"
-              "USAGENT_HOST=0.0.0.0"
-              "USAGENT_PORT=8787"
-            ];
-            Entrypoint = [ "${usagent}/bin/usagent" ];
-            Labels = { "org.opencontainers.image.title" = "usagent"; };
+        packages = {
+          default = usagent;
+          inherit usagent;
+          oci = pkgs.dockerTools.buildLayeredImage {
+            name = "usagent";
+            tag = version;
+            contents = [ pkgs.cacert ];
+            config = {
+              User = "10001:10001";
+              ExposedPorts = { "8787/tcp" = {}; };
+              Env = [
+                "USAGENT_CONFIG=/etc/usagent/config.yaml"
+                "USAGENT_HOST=0.0.0.0"
+                "USAGENT_PORT=8787"
+              ];
+              Entrypoint = [ "${usagent}/bin/usagent" ];
+              Labels = { "org.opencontainers.image.title" = "usagent"; };
+            };
           };
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+          # The macOS menu bar app (see macos/).
+          usagent-bar = pkgs.callPackage ./macos/package.nix { inherit version; };
         };
         apps.default = flake-utils.lib.mkApp { drv = usagent; };
         apps.usagent = flake-utils.lib.mkApp { drv = usagent; };

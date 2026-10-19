@@ -20,6 +20,10 @@ secrets*.env
 result
 result-*
 
+# SwiftPM (macos/)
+.build/
+.swiftpm/
+
 # Agent orchestration runtime
 .pi-subagents/
 
