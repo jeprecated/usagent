@@ -62,6 +62,58 @@ enum ModelChecks {
     try expectEqual(model.compactBarText, "AI: —")
     try expect(model.isEmpty)
     try expect(model.popupText.hasSuffix("usage endpoint unavailable (503)"))
+    try expectEqual(UsageModel(overview: Overview(), settings: settings { $0.barPrefix = "" }, now: now).compactBarText, "—")
+  }
+
+  static func testBarModesTimesAndPrefix() throws {
+    func bar(_ configure: (inout Settings) -> Void) -> String {
+      UsageModel(
+        overview: overview(cliproxyFixture()),
+        settings: settings {
+          $0.providers = ["cliproxy", "cursor"]
+          configure(&$0)
+        },
+        now: now
+      ).compactBarText
+    }
+    // C·j's 5-hour session (12%) is tighter than C·c; X·j2 (15%!) than X·j1.
+    try expectEqual(bar { $0.barMode = "kinds" }, "AI: C 56% F40% 4d S 12%! 21m · X 15%! 30h · CUR M 81% 19d")
+    try expectEqual(bar { $0.barMode = "worst" }, "AI: C 56% F40% 4d S 12%! 21m")
+    try expectEqual(
+      bar {
+        $0.barMode = "kinds"
+        $0.showBarTimes = false
+        $0.barPrefix = ""
+      },
+      "C 56% F40% S 12%! · X 15%! · CUR M 81%"
+    )
+    try expectEqual(
+      bar { $0.barMode = "unknown" },
+      "AI: C·c 86% 6d · C·j 56% F40% 4d S 12%! 21m · X·j1 80% 5d · X·j2 15%! 30h · CUR M 81% 19d"
+    )
+  }
+
+  static func testResetWatch() throws {
+    func model(at time: Double) -> UsageModel {
+      UsageModel(overview: overview(cliproxyFixture()), settings: settings { $0.providers = ["cliproxy", "cursor"] }, now: time)
+    }
+    var watch = ResetWatch()
+    // A reset that has already passed when first seen is not reported.
+    try expectEqual(watch.update(model(at: now + 5 * day)), [])
+
+    watch = ResetWatch()
+    try expectEqual(watch.update(model(at: now)), [])
+    try expectEqual(watch.update(model(at: now + 22 * minute)), [MeterReset(account: "Claude j***@self.example", meter: "5-hour")])
+    try expectEqual(watch.update(model(at: now + 23 * minute)), [])
+    // Unused meters (C·c's 5-hour and Fable weekly at 100%) are not reported.
+    let resets = watch.update(model(at: now + 7 * day))
+    try expectEqual(resetNotificationBody(resets), """
+      Claude c***@jordan.example: Weekly
+      Claude j***@self.example: Weekly, Fable weekly
+      Codex j***@self.example: Weekly
+      Codex j***@gmail.example: Weekly
+      """)
+    try expectEqual(watch.update(model(at: now + 20 * day)), [MeterReset(account: "Cursor", meter: "Models")])
   }
 
   static func testShortLabelsAndMeterLabels() throws {
@@ -241,9 +293,18 @@ enum SettingsChecks {
       "sessionBarThreshold": 15,
       "auxFetchIntervalMs": 1000,
       "windows": "not a list",
+      "barMode": "kinds",
+      "showBarTimes": false,
+      "barPrefix": "",
+      "notifyResets": true,
     ])
     let settings = Settings(defaults: defaults)
     try expectEqual(settings.providers, ["cliproxy", "cursor"])
+    try expectEqual(settings.barMode, "kinds")
+    try expectFalse(settings.showBarTimes)
+    try expectEqual(settings.barPrefix, "")
+    try expect(settings.notifyResets)
+    try expectFalse(Settings().notifyResets)
     try expectFalse(settings.showFableWeekly)
     try expectEqual(settings.sessionBarThreshold, 15)
     try expectEqual(settings.auxIntervalMs, 30_000)
@@ -270,6 +331,8 @@ public let allChecks: [Check] = [
   Check("GoldenChecks.testCompactBarSplitsCliproxyAccounts", GoldenChecks.testCompactBarSplitsCliproxyAccounts),
   Check("GoldenChecks.testCliproxyAccountsGroupMetersAndCredits", GoldenChecks.testCliproxyAccountsGroupMetersAndCredits),
   Check("ModelChecks.testEmptyOverview", ModelChecks.testEmptyOverview),
+  Check("ModelChecks.testBarModesTimesAndPrefix", ModelChecks.testBarModesTimesAndPrefix),
+  Check("ModelChecks.testResetWatch", ModelChecks.testResetWatch),
   Check("ModelChecks.testShortLabelsAndMeterLabels", ModelChecks.testShortLabelsAndMeterLabels),
   Check("ModelChecks.testStaleAndErrorItems", ModelChecks.testStaleAndErrorItems),
   Check("ModelChecks.testWindowGatingAndModelDedupe", ModelChecks.testWindowGatingAndModelDedupe),

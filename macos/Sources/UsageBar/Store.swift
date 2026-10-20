@@ -5,7 +5,8 @@ import UsageCore
 func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
 
 /// Polls usagent and publishes a fresh `UsageModel` whenever the data or the
-/// clock changes. Settings are re-read on every poll.
+/// clock changes. Settings are re-read on every poll. With `notifyResets` it
+/// posts a notification when a used meter's window resets.
 @MainActor
 final class Store: ObservableObject {
   @Published private(set) var model: UsageModel
@@ -18,6 +19,8 @@ final class Store: ObservableObject {
   private var fetching = false
   private var lastAuxiliaryFetchAt: Double = 0
   private let client = UsageClient(timeout: 5)
+  private var resetWatch = ResetWatch()
+  private let notifier = Notifier()
 
   init() {
     model = UsageModel(overview: Overview(), settings: settings, now: nowMs())
@@ -46,6 +49,7 @@ final class Store: ObservableObject {
     guard !fetching else { return }
     fetching = true
     settings = Settings.load()
+    if settings.notifyResets { notifier.requestAuthorization() }
     let settings = settings
     Task {
       do {
@@ -71,6 +75,8 @@ final class Store: ObservableObject {
       now: nowMs(),
       error: error
     )
+    let resets = resetWatch.update(model)
+    if settings.notifyResets, !resets.isEmpty { notifier.post(resets) }
   }
 
   /// UsageStore's rule: after a successful usage fetch, fetch the auxiliary

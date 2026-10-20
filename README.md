@@ -429,11 +429,12 @@ swift build
 - The menu bar item is coloured by account kind and severity. Clicking it opens the popover, which has Refresh and Quit buttons.
 - The app polls `usageUrl` every 10 s with a 5 s timeout. It fetches the expiring-usage and reset-credit endpoints at most every `auxFetchIntervalMs`, after a successful poll.
 - When a fetch fails, the bar keeps its last values and dims, and the popup shows the error.
+- With `notifyResets`, it posts a notification when a used meter's window resets, for example `Claude j***@self.example: Weekly, Fable weekly`. Meters at 100% are skipped, and so is a reset that passed while the app was not running. macOS asks for permission on the first poll that has `notifyResets` set. An unbundled binary posts nothing.
 - It runs as an accessory app (`LSUIElement`), so it has no Dock icon. It exits non-zero only on a crash, so launchd can restart it with `KeepAlive.SuccessfulExit = false`. Quit exits 0.
 - `--dump` exits non-zero when the usage fetch fails.
 - The Nix build runs the checks through the `UsageCoreChecks` executable, because nixpkgs' SwiftPM cannot run XCTest on Darwin. `swift test` runs the same checks.
 
-Settings live in the `dev.jeprecated.usagent-bar` defaults domain. They use the Noctalia widget's setting names and defaults, except that `usageUrl` defaults to Lattice's daemon. The app reads them again on every poll.
+Settings live in the `dev.jeprecated.usagent-bar` defaults domain. They use the Noctalia widget's setting names and defaults, except that `usageUrl` defaults to Lattice's daemon. The bar and notification settings at the end of the table are UsageBar's own. The app reads them again on every poll.
 
 | Key | Type | Default |
 |---|---|---|
@@ -452,12 +453,26 @@ Settings live in the `dev.jeprecated.usagent-bar` defaults domain. They use the 
 | `auxFetchIntervalMs` | number | `300000` (at least `30000`) |
 | `popoverWidth`, `popoverMaxHeight` | number | `540`, `520` |
 | `colors` | dictionary of `#RRGGBB` / `#AARRGGBB` | the widget's palette |
+| `barMode` | `accounts`, `kinds` or `worst` | `accounts` |
+| `showBarTimes` | bool | `true` |
+| `barPrefix` | string | `AI: ` |
+| `notifyResets` | bool | `false` |
+
+`barMode` sets how many accounts the bar shows. `accounts` shows each account. `kinds` shows only the tightest account of each kind (Claude, Codex, Cursor and so on), and `worst` shows only the tightest account overall. Tightest means the most severe, then the least remaining. Both of those modes label an account by its kind alone. With the CLIProxy example above, `kinds` with `showBarTimes` off and an empty `barPrefix` gives:
+
+```text
+C 56% F40% S 12%! · X 15%! · CUR M 81%
+```
+
+`showBarTimes` off drops the countdowns. Severity colours and the popup are the same in every mode.
 
 ```sh
 defaults write dev.jeprecated.usagent-bar usageUrl -string http://lattice.tail6e682f.ts.net:8788/v1/usage
 defaults write dev.jeprecated.usagent-bar providers -array cliproxy cursor
-# One-off override without writing defaults:
-UsageBar --dump -providers '(cliproxy, cursor)'
+defaults write dev.jeprecated.usagent-bar barMode -string kinds
+defaults write dev.jeprecated.usagent-bar showBarTimes -bool false
+# One-off override without writing defaults (bools need plist syntax):
+UsageBar --dump -providers '(cliproxy, cursor)' -barMode worst -showBarTimes '<false/>'
 ```
 
 The bundle's `Info.plist` allows plain HTTP to `ts.net` hosts, because the daemon is reached over the tailnet without TLS. Other plain-HTTP hosts are subject to App Transport Security.

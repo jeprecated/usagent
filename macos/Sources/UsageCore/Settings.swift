@@ -2,7 +2,8 @@ import Foundation
 
 /// The subset of the Noctalia widget's manifest `defaultSettings` that the compact
 /// bar and the popup use, with the same names and defaults. `usageUrl` defaults to
-/// Lattice's daemon instead of file mode, which this app does not support.
+/// Lattice's daemon instead of file mode, which this app does not support. The
+/// bar and notification settings at the end are UsageBar's own.
 public struct Settings {
   public static let domain = "dev.jeprecated.usagent-bar"
   public static let defaultUsageUrl = "http://lattice.tail6e682f.ts.net:8788/v1/usage"
@@ -26,6 +27,11 @@ public struct Settings {
   public var popoverWidth: Double = 540
   public var popoverMaxHeight: Double = 520
   public var colors: [String: String] = [:]
+  /// "accounts", "kinds" or "worst"; see `UsageModel.barSegments`.
+  public var barMode = "accounts"
+  public var showBarTimes = true
+  public var barPrefix = "AI: "
+  public var notifyResets = false
 
   public init() {}
 
@@ -59,6 +65,10 @@ public struct Settings {
     if let v = number("popoverWidth") { popoverWidth = v }
     if let v = number("popoverMaxHeight") { popoverMaxHeight = v }
     if let v = defaults.dictionary(forKey: "colors") { colors = v.compactMapValues { $0 as? String } }
+    if let v = string("barMode") { barMode = v }
+    if let v = bool("showBarTimes") { showBarTimes = v }
+    if let v = string("barPrefix") { barPrefix = v }
+    if let v = bool("notifyResets") { notifyResets = v }
   }
 
   /// The app's own defaults domain. An unbundled binary (for example

@@ -53,7 +53,7 @@ final class StatusController: NSObject {
     button.toolTip = model.error == "" ? nil : model.error
   }
 
-  /// BarWidget's compact row: "AI: ", then segments joined by " · ", label parts
+  /// BarWidget's compact row: `barPrefix`, then segments joined by " · ", label parts
   /// in the kind colour, non-ok values in their severity colour, times dimmed.
   static func title(_ model: UsageModel, _ palette: Palette) -> NSAttributedString {
     let size = NSFont.menuBarFont(ofSize: 0).pointSize
@@ -70,7 +70,7 @@ final class StatusController: NSObject {
       ]))
     }
 
-    append("AI: ", text, medium, 0.88)
+    if model.settings.barPrefix != "" { append(model.settings.barPrefix, text, medium, 0.88) }
     if model.compactBarSegments.isEmpty { append("—", text, medium, 0.68) }
     for (index, segment) in model.compactBarSegments.enumerated() {
       if index > 0 { append(" · ", text, medium, 0.54) }

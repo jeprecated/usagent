@@ -33,8 +33,20 @@ public struct BarSegment {
   public let provider: String
   public let kind: String
   public let parts: [BarPart]
+  /// The lowest remaining percentage among the segment's values.
+  public let remaining: Double?
   public var text: String { parts.map(\.text).joined(separator: " ") }
   public var severity: Severity { parts.map(\.severity).max() ?? .ok }
+
+  /// More severe first, then less remaining.
+  func isTighter(than other: BarSegment) -> Bool {
+    if severity != other.severity { return severity > other.severity }
+    return (remaining ?? 101) < (other.remaining ?? 101)
+  }
+
+  func labeled(_ label: String) -> BarSegment {
+    BarSegment(provider: provider, kind: kind, parts: [BarPart(text: label, severity: .ok, role: .label)] + parts.dropFirst(), remaining: remaining)
+  }
 }
 
 /// One account's quotas. CLIProxy pools several upstream accounts under one
@@ -112,14 +124,14 @@ public struct UsageModel {
     quotaItemById = byId
 
     providerGroups = groupedProviderData()
-    compactBarSegments = providerGroups.flatMap { $0.accounts.compactMap(buildAccountSegment) }
+    compactBarSegments = barSegments()
     visibleExpiringOpportunities = filteredExpiringOpportunities()
     visibleResetCredits = filteredResetCredits()
     severity = overallSeverity()
   }
 
   public var compactBarText: String {
-    compactBarSegments.isEmpty ? "AI: —" : "AI: " + compactBarSegments.map(\.text).joined(separator: " · ")
+    settings.barPrefix + (compactBarSegments.isEmpty ? "—" : compactBarSegments.map(\.text).joined(separator: " · "))
   }
 
   public var isEmpty: Bool {
@@ -535,26 +547,50 @@ public struct UsageModel {
     parts.append(BarPart(text: windowPrefix + value, severity: quotaRuntimeSeverity(primary), role: .value))
 
     let primaryPercent = remainingPercentValue(primary)
+    var remaining = primaryPercent
     if primaryWindow != "fableWeekly", windowEnabled("fableWeekly") {
       let fable = worstQuotaItem(accountWindowItems(account, "fableWeekly"))
       if let fablePercent = remainingPercentValue(fable), primaryPercent == nil || fablePercent < primaryPercent! {
         parts.append(BarPart(text: "F" + compactItemText(fable), severity: quotaRuntimeSeverity(fable), role: .value))
+        remaining = fablePercent
       }
     }
 
-    let timeLeft = timeLeftText(primary)
+    let timeLeft = settings.showBarTimes ? timeLeftText(primary) : ""
     if timeLeft != "" { parts.append(BarPart(text: timeLeft, severity: .ok, role: .time)) }
 
     if primaryWindow != "session" {
       let session = worstQuotaItem(accountWindowItems(account, "session"))
       if let sessionPercent = remainingPercentValue(session), sessionPercent <= settings.sessionBarThreshold {
-        let sessionLeft = timeLeftText(session)
+        let sessionLeft = settings.showBarTimes ? timeLeftText(session) : ""
         let text = "S " + compactItemText(session) + (sessionLeft != "" ? " " + sessionLeft : "")
         parts.append(BarPart(text: text, severity: quotaRuntimeSeverity(session), role: .value))
+        remaining = min(remaining ?? sessionPercent, sessionPercent)
       }
     }
 
-    return BarSegment(provider: account.provider, kind: account.kind, parts: parts)
+    return BarSegment(provider: account.provider, kind: account.kind, parts: parts, remaining: remaining)
+  }
+
+  /// `barMode` "accounts" shows every account. "kinds" shows the tightest account
+  /// of each kind and "worst" only the tightest account; both label it by kind
+  /// alone. Any other mode shows every account.
+  func barSegments() -> [BarSegment] {
+    let candidates = providerGroups.flatMap { group in
+      group.accounts.compactMap { account in buildAccountSegment(account).map { (account, $0) } }
+    }
+    guard settings.barMode == "kinds" || settings.barMode == "worst" else { return candidates.map(\.1) }
+
+    let group: (Account) -> String = settings.barMode == "worst" ? { _ in "" } : { $0.kind }
+    var tightest: [(account: Account, segment: BarSegment)] = []
+    for (account, segment) in candidates {
+      if let index = tightest.firstIndex(where: { group($0.account) == group(account) }) {
+        if segment.isTighter(than: tightest[index].segment) { tightest[index] = (account, segment) }
+      } else {
+        tightest.append((account, segment))
+      }
+    }
+    return tightest.map { $0.segment.labeled($0.account.pooled ? Self.kindCompactLabel($0.account.kind) : $0.account.shortLabel) }
   }
 
   // MARK: Popup
