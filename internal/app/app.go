@@ -38,6 +38,7 @@ type App struct {
 	Logger            *slog.Logger
 	mu                sync.Mutex
 	inFlight          map[string]bool
+	refreshes         sync.WaitGroup
 	resetMu           sync.Mutex
 	claudeResetMu     sync.Mutex
 	resetOnceDaemon   atomic.Bool
@@ -337,7 +338,11 @@ func (a *App) claudeProvider() *claude.Provider {
 func (a *App) RefreshDue(ctx context.Context, now time.Time) {
 	for _, p := range a.Providers {
 		if a.Store.NeedsRefresh(p.ID(), now) {
-			go a.RefreshOne(ctx, p, now)
+			a.refreshes.Add(1)
+			go func() {
+				defer a.refreshes.Done()
+				a.RefreshOne(ctx, p, now)
+			}()
 		}
 	}
 }
@@ -400,6 +405,8 @@ func (a *App) recordRefresh(p providers.Provider, result providers.Result, err e
 	}
 }
 
+// RunRefreshLoop refreshes due providers until ctx ends, then waits for the
+// refreshes it started so none writes state after it returns.
 func (a *App) RunRefreshLoop(ctx context.Context) {
 	a.RefreshDue(ctx, time.Now())
 	ticker := time.NewTicker(time.Second)
@@ -407,6 +414,7 @@ func (a *App) RunRefreshLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			a.refreshes.Wait()
 			return
 		case now := <-ticker.C:
 			a.RefreshDue(ctx, now)

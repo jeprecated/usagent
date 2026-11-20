@@ -109,7 +109,11 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 		return fmt.Errorf("load reset events: %w", err)
 	}
 	a.EnableResetOnce()
-	go a.RunRefreshLoop(ctx)
+	refreshDone := make(chan struct{})
+	go func() {
+		a.RunRefreshLoop(ctx)
+		close(refreshDone)
+	}()
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: httpapi.New(a, opts.ConfigPath), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -120,6 +124,9 @@ func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	}()
 	logger.Info("usagent listening", "host", cfg.Server.Host, "port", cfg.Server.Port, "configPath", opts.ConfigPath)
 	err = srv.ListenAndServe()
+	// Let in-flight refreshes finish their state writes before returning.
+	stop()
+	<-refreshDone
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
