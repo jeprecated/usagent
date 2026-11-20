@@ -423,7 +423,7 @@ func TestClaudeResetCreditsEndpoints(t *testing.T) {
 			consumed = true
 			fmt.Fprint(w, `{"result":"reset","cleared":["five_hour","seven_day"],"weekly_resets_at":"2026-09-29T12:00:00Z"}`)
 		default:
-			fmt.Fprint(w, `{"cedar_ember":{"eligible":true,"next_grant_id":"grant-1","grants":[{"id":"grant-1","label":"Full reset","resets_left":1,"starts_at":"2026-09-22T00:00:00Z","ends_at":"2026-10-22T00:00:00Z","usable_now":true}]}}`)
+			fmt.Fprint(w, `{"cedar_ember":{"eligible":true,"next_grant_id":"grant-1","grants":[{"id":"grant-1","label":"Full reset","resets_left":1,"starts_at":"2026-09-22T00:00:00Z","ends_at":"2099-10-22T00:00:00Z","usable_now":true}]}}`)
 		}
 	}))
 	defer provider.Close()
