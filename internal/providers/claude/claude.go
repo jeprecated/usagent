@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -671,9 +672,10 @@ func Normalize(payload usagePayload, now time.Time, refreshMs, staleMs int64) []
 		}
 	}
 	if payload.CedarEmber != nil && !resetSurfaceRejected(payload.CedarEmber) {
-		item := resetCreditsItem(availableResetCount(payload.CedarEmber), now, refreshMs, staleMs)
-		item.ExpiresAt = earliestGrantExpiry(payload.CedarEmber, now)
-		items = append(items, item)
+		items = append(items, resetCreditsItem(payload.CedarEmber, ResetKindWeekly, now, refreshMs, staleMs))
+		if fable := resetCreditsItem(payload.CedarEmber, ResetKindFable, now, refreshMs, staleMs); fable.Remaining > 0 {
+			items = append(items, fable)
+		}
 	}
 	return items
 }
@@ -792,12 +794,35 @@ func normalizeSeverity(v string) string {
 		return "ok"
 	}
 }
-func resetCreditsItem(count int, now time.Time, refreshMs, staleMs int64) model.QuotaItem {
-	if count < 0 {
-		count = 0
+
+// Banked reset kinds. A weekly reset clears the account-wide weekly limit; a
+// Fable reset only refills the Fable allowance and gives back what Fable used
+// of the weekly limit.
+const (
+	ResetKindWeekly = "weekly"
+	ResetKindFable  = "fable"
+)
+
+// grantKind classifies a grant by the limits it clears. Anthropic's own
+// `type` field is not usable for this: Fable grants report "full".
+func grantKind(g cedarGrant) string {
+	if slices.Contains(g.Clears, "seven_day_overage_included") && !slices.Contains(g.Clears, "seven_day") {
+		return ResetKindFable
 	}
+	return ResetKindWeekly
+}
+
+// resetCreditsItem counts one kind of banked reset. Both kinds share the
+// resetCredits window so clients treat them as reset credits; the window
+// label tells them apart.
+func resetCreditsItem(block *cedarEmber, kind string, now time.Time, refreshMs, staleMs int64) model.QuotaItem {
+	id, label, windowLabel := "claude-code-rate-limit-reset-credits", "Claude weekly resets", "Weekly resets"
+	if kind == ResetKindFable {
+		id, label, windowLabel = "claude-code-fable-reset-credits", "Claude Fable resets", "Fable resets"
+	}
+	count := float64(availableResetCount(block, kind))
 	nowMs := now.UnixMilli()
-	return model.QuotaItem{ID: "claude-code-rate-limit-reset-credits", Provider: "claude-code", Label: "Claude resets", Window: model.Window{ID: "resetCredits", Label: "Resets", Kind: "credit"}, Unit: "credits", Limit: float64(count), Used: 0, Remaining: float64(count), PercentUsed: 0, State: "fresh", Severity: "ok", Visible: true, Refresh: &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs}}
+	return model.QuotaItem{ID: id, Provider: "claude-code", Label: label, Window: model.Window{ID: "resetCredits", Label: windowLabel, Kind: "credit"}, Unit: "credits", Limit: count, Used: 0, Remaining: count, PercentUsed: 0, State: "fresh", Severity: "ok", Visible: true, ExpiresAt: earliestGrantExpiry(block, kind, now), Refresh: &model.Refresh{LastUpdatedAt: nowMs, Source: "provider", NextRefreshAt: nowMs + refreshMs, StaleAt: nowMs + staleMs}}
 }
 
 func weeklyExhausted(payload usagePayload, now time.Time) bool {
@@ -819,6 +844,7 @@ func normalizeResetCredits(block *cedarEmber, now time.Time) model.ClaudeResetCr
 	for _, g := range block.Grants {
 		credit := model.ClaudeResetCredit{
 			ID:          g.ID,
+			Kind:        grantKind(g),
 			Status:      grantStatus(g, now),
 			Title:       g.Label,
 			GrantedAt:   g.StartsAt,
@@ -842,25 +868,25 @@ func resetSurfaceRejected(block *cedarEmber) bool {
 	return block != nil && block.IneligibleReason == "surface"
 }
 
-func availableResetCount(block *cedarEmber) int {
+func availableResetCount(block *cedarEmber, kind string) int {
 	if block == nil {
 		return 0
 	}
 	count := 0
 	for _, g := range block.Grants {
-		if g.ResetsLeft > 0 {
+		if g.ResetsLeft > 0 && grantKind(g) == kind {
 			count += g.ResetsLeft
 		}
 	}
 	return count
 }
 
-// earliestGrantExpiry is when the next grant with resets left lapses.
-func earliestGrantExpiry(block *cedarEmber, now time.Time) *int64 {
+// earliestGrantExpiry is when the next grant of a kind with resets left lapses.
+func earliestGrantExpiry(block *cedarEmber, kind string, now time.Time) *int64 {
 	var earliest *int64
 	for _, g := range block.Grants {
 		expires, ok := parseFlexibleTime(g.EndsAt)
-		if g.ResetsLeft <= 0 || !ok || !expires.After(now) {
+		if g.ResetsLeft <= 0 || grantKind(g) != kind || !ok || !expires.After(now) {
 			continue
 		}
 		if ms := expires.UnixMilli(); earliest == nil || ms < *earliest {

@@ -37,6 +37,32 @@ func TestNormalizeCedarEmberResetCredits(t *testing.T) {
 	}
 }
 
+func TestNormalizeSeparatesWeeklyAndFableResets(t *testing.T) {
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	fable := []string{"seven_day_overage_included"}
+	payload := usagePayload{CedarEmber: &cedarEmber{
+		Eligible: true,
+		Grants: []cedarGrant{
+			{ID: "full-reset-2611", ResetsLeft: 1, EndsAt: "2026-12-10T22:00:00+00:00", UsableNow: true, Clears: []string{"seven_day", "seven_day_overage_included"}},
+			{ID: "launch-2610-fable", ResetsLeft: 1, EndsAt: "2027-03-09T07:59:00+00:00", UsableNow: true, Clears: fable},
+			{ID: "launch-2610-fable-6mo", ResetsLeft: 1, EndsAt: "2027-03-09T07:59:00+00:00", UsableNow: true, Clears: fable},
+		},
+	}}
+	items := Normalize(payload, now, 1000, 2000)
+	if len(items) != 2 {
+		t.Fatalf("items=%+v", items)
+	}
+	weekly, fableItem := items[0], items[1]
+	weeklyExpiry := time.Date(2026, 12, 10, 22, 0, 0, 0, time.UTC).UnixMilli()
+	if weekly.ID != "claude-code-rate-limit-reset-credits" || weekly.Window.Label != "Weekly resets" || weekly.Remaining != 1 || weekly.ExpiresAt == nil || *weekly.ExpiresAt != weeklyExpiry {
+		t.Fatalf("weekly=%+v", weekly)
+	}
+	fableExpiry := time.Date(2027, 3, 9, 7, 59, 0, 0, time.UTC).UnixMilli()
+	if fableItem.ID != "claude-code-fable-reset-credits" || fableItem.Window.ID != "resetCredits" || fableItem.Window.Label != "Fable resets" || fableItem.Remaining != 2 || fableItem.ExpiresAt == nil || *fableItem.ExpiresAt != fableExpiry {
+		t.Fatalf("fable=%+v", fableItem)
+	}
+}
+
 func TestFetchForResetRequiresWeeklyExhaustion(t *testing.T) {
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, "credentials.json")
@@ -79,6 +105,7 @@ func TestListResetCreditsMapsGrants(t *testing.T) {
 				"grants": []map[string]any{
 					{"id": "grant-a", "label": "Full reset", "resets_left": 1, "resets_total": 1, "starts_at": "2026-09-22T00:00:00Z", "ends_at": "2026-10-22T00:00:00Z", "usable_now": true, "clears": []string{"five_hour"}},
 					{"id": "grant-b", "resets_left": 1, "ends_at": "2026-09-21T00:00:00Z", "usable_now": true},
+					{"id": "grant-c", "resets_left": 1, "ends_at": "2026-10-22T00:00:00Z", "usable_now": true, "clears": []string{"seven_day_overage_included"}},
 				},
 			},
 		})
@@ -89,11 +116,14 @@ func TestListResetCreditsMapsGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Eligible || res.AvailableCount != 1 || res.NextGrantID != "grant-a" || len(res.Credits) != 2 {
+	if !res.Eligible || res.AvailableCount != 2 || res.NextGrantID != "grant-a" || len(res.Credits) != 3 {
 		t.Fatalf("list=%+v", res)
 	}
 	if res.Credits[0].Status != "available" || res.Credits[1].Status != "expired" {
 		t.Fatalf("statuses=%q %q", res.Credits[0].Status, res.Credits[1].Status)
+	}
+	if res.Credits[0].Kind != ResetKindWeekly || res.Credits[2].Kind != ResetKindFable {
+		t.Fatalf("kinds=%q %q", res.Credits[0].Kind, res.Credits[2].Kind)
 	}
 }
 

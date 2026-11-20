@@ -49,25 +49,36 @@ providers:
 
 `allowResetConsume` defaults to `false`. Set it to `true` only if trusted local callers should be able to spend a real banked reset via the `usagent` HTTP API.
 
+## Reset kinds
+
+Anthropic grants two kinds of banked reset, which `usagent` tells apart by the limits a grant `clears`:
+
+- **Weekly reset** (`kind: "weekly"`): clears the account-wide weekly limit (`seven_day`).
+- **Fable reset** (`kind: "fable"`): clears only `seven_day_overage_included`. It refills the Fable allowance and gives back what Fable used of the weekly limit, but does not reset the whole week.
+
+The grant's own `type` field is not used: Fable grants report `"full"`.
+
 ## Normal usage stats
 
-`GET /v1/usage` includes a quota item derived from `cedar_ember.grants[].resets_left`:
+`GET /v1/usage` includes one quota item per kind, counted from `cedar_ember.grants[].resets_left`:
 
 ```json
 {
   "id": "claude-code-rate-limit-reset-credits",
   "provider": "claude-code",
-  "label": "Claude resets",
-  "window": { "id": "resetCredits", "label": "Resets", "kind": "credit" },
+  "label": "Claude weekly resets",
+  "window": { "id": "resetCredits", "label": "Weekly resets", "kind": "credit" },
   "unit": "credits",
   "remaining": 1,
-  "expiresAt": 1792684800000
+  "expiresAt": 1796940000000
 }
 ```
 
-`expiresAt` is when the soonest grant with resets left ends (`ends_at`), in Unix milliseconds. It is omitted when no such grant has a future end time.
+Fable resets use the ID `claude-code-fable-reset-credits`, the label `Claude Fable resets` and the window label `Fable resets`. Both items share the `resetCredits` window, so clients treat them as reset credits and show the window label.
 
-The item is omitted when `cedar_ember` is absent or reports `ineligible_reason: "surface"`. Missing or surface-rejected blocks are not treated as zero balances. The detailed reset-credit endpoint returns an error for a surface rejection.
+`expiresAt` is when the soonest grant of that kind with resets left ends (`ends_at`), in Unix milliseconds. It is omitted when no such grant has a future end time.
+
+The weekly item is always present when `cedar_ember` is, even at zero; the Fable item appears only when Fable resets are left. Both are omitted when `cedar_ember` is absent or reports `ineligible_reason: "surface"`. Missing or surface-rejected blocks are not treated as zero balances. The detailed reset-credit endpoint returns an error for a surface rejection.
 
 Anthropic gates reset visibility on the request's User-Agent. The default uses the Claude Code CLI format (`claude-cli/... (external, cli)`); the old `claude-code/2.0` value yields a surface rejection even when a reset is banked. If your configuration explicitly sets that old value, remove the override or update it to the value above.
 
@@ -88,12 +99,13 @@ Example response:
   "credits": [
     {
       "id": "grant_abc",
+      "kind": "weekly",
       "status": "available",
       "title": "Full reset",
       "grantedAt": "2026-09-22T00:00:00Z",
       "expiresAt": "2026-10-22T00:00:00Z",
       "resetsLeft": 1,
-      "clears": ["five_hour", "seven_day"]
+      "clears": ["seven_day", "seven_day_overage_included"]
     }
   ],
   "fetchedAt": 1783410000000
@@ -156,7 +168,7 @@ usagent reset-once cancel --provider claude-code
 
 The ChatGPT toggle is independent and remains the default when `--provider` is omitted. Authorization is stored next to the snapshot as `snapshot.json.claude-reset-once.json`.
 
-Selection rule: the available, unexpired grant with the earliest `expiresAt`. Grants with missing or invalid expiry are skipped. The selected grant ID and a request ID are persisted **before** the consume POST.
+Selection rule: the available, unexpired weekly grant with the earliest `expiresAt`. Fable resets are never spent, because they do not clear the weekly limit. Grants with missing or invalid expiry are skipped. The selected grant ID and a request ID are persisted **before** the consume POST.
 
 `allowResetConsume` is **not** required for `reset-once`. Manual consume still requires that config flag.
 

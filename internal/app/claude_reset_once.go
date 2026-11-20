@@ -315,7 +315,8 @@ func earliestClaudeResetCredit(credits model.ClaudeResetCreditsResponse, now tim
 	}
 	for _, c := range credits.Credits {
 		expires, ok := parseCreditExpiry(c.ExpiresAt)
-		if c.Status != "available" || strings.TrimSpace(c.ID) == "" || !ok || !expires.After(now) {
+		// A Fable reset does not clear the account-wide weekly limit.
+		if c.Status != "available" || c.Kind == claude.ResetKindFable || strings.TrimSpace(c.ID) == "" || !ok || !expires.After(now) {
 			continue
 		}
 		if selected.ID == "" || expires.Before(earliest) || (expires.Equal(earliest) && c.ID < selected.ID) {

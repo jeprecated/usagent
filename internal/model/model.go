@@ -135,6 +135,7 @@ type ChatGPTResetConsumeResponse struct {
 
 type ClaudeResetCredit struct {
 	ID          string   `json:"id"`
+	Kind        string   `json:"kind"` // "weekly" or "fable"
 	Status      string   `json:"status"`
 	Title       string   `json:"title,omitempty"`
 	GrantedAt   string   `json:"grantedAt,omitempty"`
